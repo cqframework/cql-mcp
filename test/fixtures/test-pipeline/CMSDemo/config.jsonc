@@ -1,0 +1,9 @@
+{
+  // Sample test-pipeline config — JSONC tolerates `//` and `/* */` comments and trailing commas.
+  "testCasesToExclude": [],
+  "parameters": {
+    "global": [
+      { "name": "Measurement Period", "value": "2024-01-01/2024-12-31" }
+    ]
+  },
+}
