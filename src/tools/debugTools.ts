@@ -67,7 +67,12 @@ export function buildDebugTools(session: DapSession): Tool[] {
         'them before launch (via the LS pre-launch breakpoints fallback), avoiding a separate ' +
         'cql_debug_set_breakpoints round-trip. Enforces a single active session: ' +
         'call cql_debug_stop first if one is already running. Pass cqlFile as the path to ' +
-        'a .cql file (the tool internally computes both DAP-form and executeCql-form URIs).',
+        'a .cql file (the tool internally computes both DAP-form and executeCql-form URIs). For a file in the ' +
+        'IG Publisher default layout (<root>/input/cql/*.cql with an ig.ini at <root> or above), rootDir, ' +
+        'terminologyUri and optionsPath default to <root> and the default-layout paths ' +
+        '<root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json (when they exist), as for ' +
+        'cql_execute; explicit arguments override. Without rootDir an IG library fails to compile and the ' +
+        'session terminates without stopping.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -101,7 +106,12 @@ export function buildDebugTools(session: DapSession): Tool[] {
     },
     {
       name: 'cql_debug_set_breakpoints',
-      description: 'Set breakpoints (line numbers) in a CQL file.',
+      description:
+        'Set breakpoints (line numbers) in a CQL file. Put each breakpoint on an expression line, not on the ' +
+        '`define "X":` line: the LS only stops on expression and expression-term start lines ' +
+        '(CqlStepPositionCollector.collectBreakpointableLines). The response may still say verified=true for ' +
+        'other lines; the LS marks them unverified later (BreakpointManager.updateBreakpointLineVerification), ' +
+        'and a resume that then terminates without stopping lists them in unverifiedBreakpoints.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -130,7 +140,10 @@ export function buildDebugTools(session: DapSession): Tool[] {
         'Resume execution; blocks until the debuggee stops, terminates, or the optional ' +
         'timeoutMs elapses. Timeout is NOT an error: the session stays alive and paused. ' +
         'When the debuggee terminates (or the language server goes away) the session ends by itself, ' +
-        'so cql_debug_start can be called again without cql_debug_stop.',
+        'so cql_debug_start can be called again without cql_debug_stop. If it terminates without ever ' +
+        'stopping although breakpoints were set, the result has a note, unverifiedBreakpoints, and errors ' +
+        '(Error entries from re-running the library with the launch settings); with no breakpoints set the ' +
+        'note is "terminated (no breakpoints set)".',
       inputSchema: {
         type: 'object',
         properties: {
@@ -150,7 +163,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
     },
     {
       name: 'cql_debug_next',
-      description: 'Step over the current statement. Same blocked-until-stop semantics as continue.',
+      description: 'Step over the current statement. Same blocked-until-stop semantics, and same terminated result, as continue.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -167,7 +180,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
     },
     {
       name: 'cql_debug_step_in',
-      description: 'Step into the current call. Same blocked-until-stop semantics as continue.',
+      description: 'Step into the current call. Same blocked-until-stop semantics, and same terminated result, as continue.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -184,7 +197,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
     },
     {
       name: 'cql_debug_step_out',
-      description: 'Step out of the current function. Same blocked-until-stop semantics as continue.',
+      description: 'Step out of the current function. Same blocked-until-stop semantics, and same terminated result, as continue.',
       inputSchema: {
         type: 'object',
         properties: {

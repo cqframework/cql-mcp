@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { CqlLsProcess } from '../../src/jvm/cqlLsProcess.js';
 import { findJavaRuntime } from '../../src/jvm/javaLocator.js';
-import type { DapSession } from '../../src/dap/dapSession.js';
+import { DapSession } from '../../src/dap/dapSession.js';
 import type { McpContext } from '../../src/tools/defs.js';
 import { buildExecuteCqlRequest, executeCqlTool, type CqlExecuteResult } from '../../src/tools/executeCqlTool.js';
 import { runSuite } from '../../src/testPipeline/suiteRunner.js';
@@ -119,5 +119,43 @@ describe('IG layout integration (real JVM)', () => {
     const result = (await executeCqlTool.handler(ctx!, { cqlFile: scratch })) as CqlExecuteResult;
     expect(result.success).to.equal(true);
     expect(values(result.results[0]!).get('One')).to.equal('1');
+  });
+
+  it('cql_debug_start on an IG-layout file stops at a breakpoint', async function () {
+    if (!available) return this.skip();
+    this.timeout(60_000);
+    const session = new DapSession({ ls: proc!, resumeTimeoutMs: 30_000 });
+    try {
+      await session.start({
+        cqlFile: igCql,
+        testCaseName: 'p1',
+        testCaseDir: path.join(igRoot, 'input', 'tests', 'IgMinimal', 'p1'),
+      });
+      await session.setBreakpoints(igCql, [8]); // `exists [Condition]`, the body of "Has Condition"
+      const ev = await session.continue(1);
+      expect(ev.event).to.equal('stopped');
+      expect(ev.topFrame?.line).to.equal(8);
+    } finally {
+      await session.stop();
+    }
+  });
+
+  it('a debug session that terminates without stopping reports the library errors', async function () {
+    if (!available) return this.skip();
+    this.timeout(60_000);
+    // On a library with compile errors the LS launch succeeds, sends no output, and terminates.
+    const broken = path.join(projectRoot, 'test', 'fixtures', 'malformed', 'BrokenLibrary.cql');
+    const session = new DapSession({ ls: proc!, resumeTimeoutMs: 30_000 });
+    try {
+      await session.start({ cqlFile: broken });
+      await session.setBreakpoints(broken, [4]);
+      const ev = await session.continue(1);
+      expect(ev.event).to.equal('terminated');
+      expect(ev.note).to.contain('terminated without stopping');
+      expect(ev.errors).to.be.an('array').that.is.not.empty;
+      expect(session.isActive).to.equal(false);
+    } finally {
+      await session.stop();
+    }
   });
 });

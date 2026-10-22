@@ -97,7 +97,7 @@ CQL files are expected in the HL7 IG Publisher default layout, the only layout t
   input/tests/<Library>/<case>/*.json     # CQF test-case convention (not a publisher parameter)
 ```
 
-For a `.cql` file in `<root>/input/cql/` with an `ig.ini` at `<root>` or above, `cql_execute`, `cql_test_run_file` and `cql_test_run_suite` send:
+For a `.cql` file in `<root>/input/cql/` with an `ig.ini` at `<root>` or above, `cql_execute`, `cql_test_run_file`, `cql_test_run_suite` and `cql_debug_start` send:
 
 | Field | Default | Why |
 |---|---|---|
@@ -255,6 +255,7 @@ point. End with cql_debug_stop.
 - **`cql_test_run_suite` requires Layout A.** The discovery walks `<suiteRoot>/<suiteName>/<patient-uuid>/`. If your measure stores bundles elsewhere, fall back to looping `cql_test_run_file` over each patient ID.
 - **Workspace root.** `CQL_DEBUG_MCP_WORKSPACE` defaults to `process.cwd()` of the MCP server, not your project. Set it explicitly in the MCP config so `.cql-debug/test-runs/` lands where you expect.
 - **DAP `libraryVersion` is automatic.** `cql_debug_start` extracts the version from the CQL header. Don't pass it explicitly.
+- **Breakpoints go on expression lines.** The LS only stops on expression lines, never on a `define "X":` line. `cql_debug_set_breakpoints` may still answer `verified: true` for a `define` line; the LS marks it unverified later. When a resume terminates without stopping although breakpoints were set, the result carries a `note`, the `unverifiedBreakpoints`, and `errors` from re-running the library with the launch settings.
 
 ### Worked example for CMS645
 

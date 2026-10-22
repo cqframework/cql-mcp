@@ -1,25 +1,47 @@
 import { expect } from 'chai';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { PassThrough } from 'node:stream';
 import type { Socket } from 'node:net';
 import { DapClient } from '../../../src/dap/dapClient.js';
-import { DapSession, type DapStopEvent } from '../../../src/dap/dapSession.js';
+import { DapSession, isPreviousSessionBusy, type DapStopEvent } from '../../../src/dap/dapSession.js';
 import { ContentLengthReader, writeFramed } from '../../../src/dap/framing.js';
 import type { CqlLsProcess } from '../../../src/jvm/cqlLsProcess.js';
 import type { LspClient } from '../../../src/lsp/lspClient.js';
+import { pathToUri } from '../../../src/workspace/paths.js';
 
 class FakeLsProcess {
+  /** executeCql calls made by the session (the error-collecting re-run). */
+  executeCalls: Array<{ command: string; args: unknown[] }> = [];
+  executeResponse: unknown = { results: [], logs: [] };
+  /** Errors thrown by successive startDebugSession calls before a port is returned. */
+  startFailures: unknown[] = [];
+  startCalls = 0;
+
   async ensureReady(): Promise<void> {
     /* no-op */
   }
+  async executeCommand(command: string, args: unknown[]): Promise<unknown> {
+    this.executeCalls.push({ command, args });
+    return this.executeResponse;
+  }
   get lspClient(): LspClient {
     return {
-      sendExecuteCommand: async (_cmd: string, _args: unknown[]): Promise<unknown> => 5678,
+      sendExecuteCommand: async (_cmd: string, _args: unknown[]): Promise<unknown> => {
+        this.startCalls++;
+        const failure = this.startFailures.shift();
+        if (failure !== undefined) throw failure;
+        return 5678;
+      },
+      sendNotification: () => undefined,
     } as unknown as LspClient;
   }
 }
 
 interface FakeDapSetup {
   session: DapSession;
+  ls: FakeLsProcess;
   /** What the test wants the server to send back. */
   server: PassThrough;
   /** What the client wrote; drained by the test. */
@@ -87,7 +109,12 @@ function makeFakeSocket(): {
   return { socket, clientToServer, serverToClient };
 }
 
-function makeFakeDap(opts: { resumeTimeoutMs?: number }): FakeDapSetup {
+function makeFakeDap(opts: {
+  resumeTimeoutMs?: number;
+  startRetryIntervalMs?: number;
+  startRetryTimeoutMs?: number;
+  stopSocketWaitMs?: number;
+}): FakeDapSetup {
   const { socket, clientToServer, serverToClient } = makeFakeSocket();
   const sent: object[] = [];
 
@@ -98,10 +125,15 @@ function makeFakeDap(opts: { resumeTimeoutMs?: number }): FakeDapSetup {
     return realClient;
   };
 
+  const ls = new FakeLsProcess();
   const session = new DapSession({
-    ls: new FakeLsProcess() as unknown as CqlLsProcess,
+    ls: ls as unknown as CqlLsProcess,
     dapClientFactory: factory,
     resumeTimeoutMs: opts.resumeTimeoutMs ?? 50,
+    startRetryIntervalMs: opts.startRetryIntervalMs ?? 1,
+    startRetryTimeoutMs: opts.startRetryTimeoutMs ?? 50,
+    // The fake server never closes the socket after disconnect unless a test does it.
+    stopSocketWaitMs: opts.stopSocketWaitMs ?? 5,
   });
 
   // Use a separate ContentLengthReader to capture the framed JSON the
@@ -111,6 +143,7 @@ function makeFakeDap(opts: { resumeTimeoutMs?: number }): FakeDapSetup {
 
   return {
     session,
+    ls,
     server: serverToClient,
     cli: clientToServer,
     sent,
@@ -537,5 +570,198 @@ describe('dap/dapSession', () => {
     expect(g3).to.equal(g2 + 1);
 
     await stopSessionAndAckDisconnect(setup);
+  });
+});
+
+describe('dap/dapSession — launch defaults and termination reporting', () => {
+  // IG Publisher default layout: <ig>/ig.ini, <ig>/input/cql/L.cql, <ig>/input/vocabulary/valueset/.
+  let ig: string;
+  let cqlFile: string;
+
+  beforeEach(() => {
+    ig = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dap-ig-')));
+    fs.writeFileSync(path.join(ig, 'ig.ini'), '[IG]\n');
+    fs.mkdirSync(path.join(ig, 'input', 'cql'), { recursive: true });
+    fs.mkdirSync(path.join(ig, 'input', 'vocabulary', 'valueset'), { recursive: true });
+    cqlFile = path.join(ig, 'input', 'cql', 'L.cql');
+    fs.writeFileSync(cqlFile, "library L version '1.0.0'\n\ndefine \"A\":\n  1\n");
+  });
+  afterEach(() => fs.rmSync(ig, { recursive: true, force: true }));
+
+  function launchArgsOf(setup: FakeDapSetup): Record<string, unknown> {
+    return (findSent(setup, 'launch') as unknown as { arguments: Record<string, unknown> }).arguments;
+  }
+
+  /** Ack the n-th (0-based) request with this command, once it has been sent. */
+  async function ackNth(setup: FakeDapSetup, command: string, n: number, serverSeq: number, body: unknown = {}) {
+    const ofCommand = () => setup.sent.filter((m) => (m as { command?: string }).command === command);
+    await waitUntil(() => ofCommand().length > n);
+    const sent = ofCommand()[n] as { seq: number };
+    setup.write({ seq: serverSeq, type: 'response', request_seq: sent.seq, success: true, command, body });
+  }
+
+  async function startWithBreakpoint(setup: FakeDapSetup, line: number): Promise<void> {
+    const promise = setup.session.start({ cqlFile, breakpoints: [line] });
+    await ackRequest(setup, 'initialize', 9001);
+    await ackRequest(setup, 'setBreakpoints', 9002, { breakpoints: [{ id: 1, verified: true, line }] });
+    await ackRequest(setup, 'launch', 9003);
+    await ackRequest(setup, 'configurationDone', 9004);
+    await promise;
+  }
+
+  it('derives rootDir and the default-layout terminologyUri for an IG-layout file', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 30 });
+    await startSession(setup, cqlFile);
+    const args = launchArgsOf(setup);
+    expect(args.rootDir).to.equal(pathToUri(ig));
+    expect(args.terminologyUri).to.equal(pathToUri(path.join(ig, 'input', 'vocabulary', 'valueset')));
+    expect(args).to.not.have.property('optionsPath'); // input/cql/cql-options.json does not exist
+    await stopSessionAndAckDisconnect(setup);
+  });
+
+  it('sends no rootDir for a file outside an IG', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 30 });
+    await startSession(setup, '/x/lib.cql');
+    expect(launchArgsOf(setup)).to.not.have.property('rootDir');
+    await stopSessionAndAckDisconnect(setup);
+  });
+
+  it('lets an explicit rootDir override the derived one', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 30 });
+    const other = path.join(ig, 'other');
+    const promise = setup.session.start({ cqlFile, rootDir: other });
+    await ackRequest(setup, 'initialize', 9001);
+    await ackRequest(setup, 'launch', 9002);
+    await ackRequest(setup, 'configurationDone', 9003);
+    await promise;
+    expect(launchArgsOf(setup).rootDir).to.equal(pathToUri(other));
+    await stopSessionAndAckDisconnect(setup);
+  });
+
+  it('reports "terminated (no breakpoints set)" without re-running the library', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 1000 });
+    await startSession(setup, cqlFile);
+    const promise = setup.session.continue(1);
+    await ackRequest(setup, 'continue', 9300);
+    setup.write({ seq: 9301, type: 'event', event: 'terminated', body: {} });
+    const ev = await promise;
+    expect(ev.event).to.equal('terminated');
+    expect(ev.note).to.equal('terminated (no breakpoints set)');
+    expect(setup.ls.executeCalls).to.have.length(0);
+    await ackRequest(setup, 'disconnect', 9302);
+  });
+
+  it('when breakpoints were set but none was hit, reports unverified breakpoints and the library errors', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 1000 });
+    setup.ls.executeResponse = {
+      results: [{ libraryName: 'L', expressions: [{ name: 'Error', value: 'Could not load model information' }] }],
+      logs: [],
+    };
+    await startWithBreakpoint(setup, 3);
+    // The LS later marks a non-breakpointable line (here the `define` line) unverified.
+    setup.write({
+      seq: 9200,
+      type: 'event',
+      event: 'breakpoint',
+      body: { reason: 'changed', breakpoint: { id: 1, verified: false, line: 3, source: { path: cqlFile } } },
+    });
+    const promise = setup.session.continue(1);
+    await ackRequest(setup, 'continue', 9300);
+    setup.write({ seq: 9301, type: 'event', event: 'terminated', body: {} });
+    const ev = await promise;
+    expect(ev.event).to.equal('terminated');
+    expect(ev.note).to.contain('terminated without stopping');
+    expect(ev.unverifiedBreakpoints).to.deep.equal([{ line: 3, path: cqlFile }]);
+    expect(ev.errors).to.deep.equal(['Could not load model information']);
+    // The re-run uses the launch's request shape, including the derived IG root.
+    expect(setup.ls.executeCalls).to.have.length(1);
+    const request = setup.ls.executeCalls[0]!.args[0] as { rootDir: string | null };
+    expect(request.rootDir).to.equal(pathToUri(ig));
+    await ackRequest(setup, 'disconnect', 9302);
+  });
+
+  it('adds nothing when the session stopped before it terminated', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 1000 });
+    await startWithBreakpoint(setup, 4);
+    const first = setup.session.continue(1);
+    await ackNth(setup, 'continue', 0, 9300);
+    setup.write({ seq: 9301, type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1 } });
+    await ackNth(setup, 'stackTrace', 0, 9302, { stackFrames: [{ id: 1, name: 'A', line: 4 }] });
+    expect((await first).event).to.equal('stopped');
+
+    const second = setup.session.continue(1);
+    await ackNth(setup, 'continue', 1, 9303);
+    setup.write({ seq: 9304, type: 'event', event: 'terminated', body: {} });
+    const ev = await second;
+    expect(ev).to.deep.equal({ event: 'terminated' });
+    expect(setup.ls.executeCalls).to.have.length(0);
+    await ackRequest(setup, 'disconnect', 9305);
+  });
+});
+
+describe('dap/dapSession — restart while the previous session shuts down', () => {
+  // What the LS sends while its previous session is still closing (observed with the b623850 jar):
+  // a generic JSON-RPC internal error whose data carries the stack trace naming the cause.
+  const busy = () => ({
+    code: -32603,
+    message: 'Internal error.',
+    data:
+      'java.util.concurrent.CompletionException: java.lang.IllegalStateException: Please wait for the ' +
+      'current debug session to end before starting a new one.\n\tat ...',
+  });
+
+  it('recognizes only the LS refusal for a session that is still shutting down', () => {
+    expect(isPreviousSessionBusy(busy())).to.equal(true);
+    expect(isPreviousSessionBusy({ ...busy(), code: -32600 })).to.equal(false);
+    expect(isPreviousSessionBusy({ ...busy(), data: 'java.lang.NullPointerException' })).to.equal(false);
+    expect(isPreviousSessionBusy(new Error('boom'))).to.equal(false);
+    expect(isPreviousSessionBusy(undefined)).to.equal(false);
+  });
+
+  it('retries startDebugSession until the previous session has ended', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 30 });
+    setup.ls.startFailures = [busy(), busy()];
+    await startSession(setup);
+    expect(setup.ls.startCalls).to.equal(3);
+    expect(setup.session.isActive).to.equal(true);
+    await stopSessionAndAckDisconnect(setup);
+  });
+
+  it('gives a clear error when the previous session never ends within the bound', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 30, startRetryIntervalMs: 2, startRetryTimeoutMs: 20 });
+    setup.ls.startFailures = Array.from({ length: 1000 }, busy);
+    let message = '';
+    try {
+      await setup.session.start({ cqlFile: '/x/lib.cql' });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).to.contain('previous debug session still shutting down after 0.02 s');
+    expect(setup.ls.startCalls).to.be.greaterThan(1);
+    expect(setup.session.isActive).to.equal(false);
+  });
+
+  it('does not retry other startDebugSession errors', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 30 });
+    setup.ls.startFailures = [new Error('boom')];
+    let message = '';
+    try {
+      await setup.session.start({ cqlFile: '/x/lib.cql' });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).to.equal('boom');
+    expect(setup.ls.startCalls).to.equal(1);
+  });
+
+  it('stop resolves as soon as the LS closes the socket after disconnect', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 30, stopSocketWaitMs: 5000 });
+    await startSession(setup);
+    const t0 = Date.now();
+    const stopP = setup.session.stop();
+    await ackRequest(setup, 'disconnect', 9700);
+    setup.server.end();
+    await stopP;
+    expect(Date.now() - t0).to.be.lessThan(1000);
   });
 });

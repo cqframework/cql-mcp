@@ -1,5 +1,9 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { CqlLsProcess } from '../jvm/cqlLsProcess.js';
-import { startDebugSession } from '../lsp/lspCommands.js';
+import { EXECUTE_CQL, startDebugSession } from '../lsp/lspCommands.js';
+import type { ExecuteCqlResponse } from '../lsp/protocol.js';
+import { buildExecuteCqlRequest, igDefaultsFor, openCqlFile } from '../tools/executeCqlTool.js';
 import { DapClient, DapError, type DapResponse } from './dapClient.js';
 import { libraryNameOf, pathToUri } from '../workspace/paths.js';
 import { log } from '../log.js';
@@ -36,6 +40,22 @@ export interface DapStopEvent {
   reason?: string;
   threadId?: number;
   topFrame?: DapStackFrame;
+  /** Set when the session terminated without ever stopping; see DapSession.terminatedResult. */
+  note?: string;
+  /** Breakpoints the LS reported as unverified (for example on a `define` line). */
+  unverifiedBreakpoints?: Array<{ line: number; path?: string }>;
+  /** Error entries from re-running the launch's request through executeCql. */
+  errors?: string[];
+  /** Why `errors` could not be collected, if the re-run itself failed. */
+  errorsUnavailable?: string;
+}
+
+/** Per-session bookkeeping, created on each start() and only updated by that session's client. */
+interface SessionState {
+  launch: DebugLaunchArgs;
+  everStopped: boolean;
+  /** Latest known breakpoints, keyed by LS id (or path:line when the LS sent no id). */
+  breakpoints: Map<string, { line: number; path?: string; verified: boolean }>;
 }
 
 export interface DapScope {
@@ -63,15 +83,45 @@ export interface DapSessionOptions {
   dapClientFactory?: () => DapClient;
   /** Default resume-op wait (continue/next/step*). Per-call override available. */
   resumeTimeoutMs?: number;
+  /** Retry interval and bound while the LS refuses a start because the previous session is closing. */
+  startRetryIntervalMs?: number;
+  startRetryTimeoutMs?: number;
+  /** How long stop() waits for the LS to close the socket after disconnect. */
+  stopSocketWaitMs?: number;
 }
 
 const DEFAULT_RESUME_TIMEOUT_MS = 30_000;
+const DEFAULT_START_RETRY_INTERVAL_MS = 100;
+const DEFAULT_START_RETRY_TIMEOUT_MS = 5_000;
+const DEFAULT_STOP_SOCKET_WAIT_MS = 1_000;
+
+/**
+ * The LS refuses startDebugSession while its previous session is still shutting down
+ * (cql-language-server DebugCommandContribution.kt:42-44): that session stays active until
+ * `exited()` plus a 250 ms socket-close grace (DebugSession.kt:27, :105). The refusal reaches the
+ * client as a generic JSON-RPC internal error; only the stack trace in `data` names the cause.
+ */
+const SESSION_BUSY_CODE = -32603;
+const SESSION_BUSY_TEXT = 'wait for the current debug session to end';
+
+/** True for the LS's "previous debug session is still shutting down" refusal, and nothing else. */
+export function isPreviousSessionBusy(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const { code, data } = err as { code?: unknown; data?: unknown };
+  if (code !== SESSION_BUSY_CODE) return false;
+  const text = typeof data === 'string' ? data : JSON.stringify(data ?? '');
+  return text.includes(SESSION_BUSY_TEXT);
+}
 
 export class DapSession {
   protected readonly ls: CqlLsProcess;
   protected readonly dapClientFactory: () => DapClient;
   protected defaultResumeTimeoutMs: number;
+  protected readonly startRetryIntervalMs: number;
+  protected readonly startRetryTimeoutMs: number;
+  protected readonly stopSocketWaitMs: number;
   protected client: DapClient | null = null;
+  protected state: SessionState | null = null;
   /**
    * Monotonic counter incremented on every resume() call. Each resume race
    * captures its own generation in a closure; listeners and the timer gate
@@ -86,6 +136,9 @@ export class DapSession {
     this.ls = opts.ls;
     this.dapClientFactory = opts.dapClientFactory ?? (() => new DapClient());
     this.defaultResumeTimeoutMs = opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS;
+    this.startRetryIntervalMs = opts.startRetryIntervalMs ?? DEFAULT_START_RETRY_INTERVAL_MS;
+    this.startRetryTimeoutMs = opts.startRetryTimeoutMs ?? DEFAULT_START_RETRY_TIMEOUT_MS;
+    this.stopSocketWaitMs = opts.stopSocketWaitMs ?? DEFAULT_STOP_SOCKET_WAIT_MS;
   }
 
   get isActive(): boolean {
@@ -109,13 +162,15 @@ export class DapSession {
     }
     await this.ls.ensureReady();
 
-    const port = await startDebugSession(this.ls.lspClient);
+    const port = await this.requestDebugPort();
     if (typeof port !== 'number' || !Number.isInteger(port) || port <= 0) {
       throw new Error(`startDebugSession returned invalid port: ${JSON.stringify(port)}`);
     }
     log.info('DAP dial', { port });
 
     const client = this.dapClientFactory();
+    const state: SessionState = { launch: args, everStopped: false, breakpoints: new Map() };
+    this.state = state;
     try {
       await client.connect(port);
     } catch (err) {
@@ -130,6 +185,7 @@ export class DapSession {
       );
     }
 
+    this.trackState(client, state);
     try {
       await client.send('initialize', {
         clientID: 'mcp-cql-debug',
@@ -143,7 +199,7 @@ export class DapSession {
         supportsRunInTerminalRequest: false,
       });
       if (args.breakpoints && args.breakpoints.length > 0) {
-        await this.sendSetBreakpoints(client, args.cqlFile, args.breakpoints);
+        await this.sendSetBreakpoints(client, state, args.cqlFile, args.breakpoints);
       }
       // The LS gates `launch` on `configurationDone` (see
       // CqlDebugServer.kt:135-138). VS Code sends them back-to-back without
@@ -168,11 +224,12 @@ export class DapSession {
     lines: number[],
   ): Promise<Array<{ verified: boolean; line: number; source?: { name?: string; path?: string } }>> {
     this.assertActive();
-    return this.sendSetBreakpoints(this.client!, cqlFile, lines);
+    return this.sendSetBreakpoints(this.client!, this.state!, cqlFile, lines);
   }
 
   private async sendSetBreakpoints(
     client: DapClient,
+    state: SessionState,
     cqlFile: string,
     lines: number[],
   ): Promise<Array<{ verified: boolean; line: number; source?: { name?: string; path?: string } }>> {
@@ -180,8 +237,20 @@ export class DapSession {
       source: { name: libraryNameOf(cqlFile), path: cqlFile },
       breakpoints: lines.map((line) => ({ line })),
     });
-    const body = res.body as { breakpoints?: Array<{ verified: boolean; line: number }> } | undefined;
-    return body?.breakpoints ?? [];
+    const body = res.body as { breakpoints?: Array<{ id?: number; verified: boolean; line: number }> } | undefined;
+    const breakpoints = body?.breakpoints ?? [];
+    // setBreakpoints replaces every breakpoint for this source.
+    for (const [key, bp] of state.breakpoints) {
+      if (bp.path === cqlFile) state.breakpoints.delete(key);
+    }
+    for (const bp of breakpoints) {
+      state.breakpoints.set(bp.id !== undefined ? String(bp.id) : `${cqlFile}:${bp.line}`, {
+        line: bp.line,
+        path: cqlFile,
+        verified: bp.verified,
+      });
+    }
+    return breakpoints;
   }
 
   async continue(threadId = 1, timeoutMs?: number): Promise<DapStopEvent> {
@@ -238,8 +307,119 @@ export class DapSession {
         message: err instanceof Error ? err.message : String(err),
       });
     }
+    // The LS closes the socket once its session has ended; waiting for that (bounded) makes an
+    // immediate cql_debug_start much less likely to be refused. requestDebugPort retries if it is.
+    await this.waitForSocketEnd(client, this.stopSocketWaitMs);
     await client.dispose();
     log.info('DAP session stopped');
+  }
+
+  private waitForSocketEnd(client: DapClient, ms: number): Promise<void> {
+    if (!client.isConnected()) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = (): void => {
+        clearTimeout(timer);
+        client.off('end', done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      client.once('end', done);
+    });
+  }
+
+  /** startDebugSession, retried while the LS's previous session is still shutting down. */
+  private async requestDebugPort(): Promise<number> {
+    const deadline = Date.now() + this.startRetryTimeoutMs;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await startDebugSession(this.ls.lspClient);
+      } catch (err) {
+        if (!isPreviousSessionBusy(err)) throw err;
+        if (Date.now() >= deadline) {
+          throw new Error(
+            `previous debug session still shutting down after ${this.startRetryTimeoutMs / 1000} s; ` +
+              'try cql_debug_start again',
+          );
+        }
+        log.debug('startDebugSession refused: previous session still shutting down; retrying', { attempt });
+        await new Promise((r) => setTimeout(r, this.startRetryIntervalMs));
+      }
+    }
+  }
+
+  /**
+   * Keeps `state` current from this client's events: whether the debuggee ever stopped, and the
+   * LS's later verdicts on breakpoints. The LS first answers setBreakpoints with verified=true, then
+   * sends a `breakpoint` event (reason "changed", verified=false) for lines it cannot stop on, such
+   * as a `define` line (BreakpointManager.updateBreakpointLineVerification). State belongs to one
+   * session, so events from an earlier session's client cannot reach a new one.
+   */
+  private trackState(client: DapClient, state: SessionState): void {
+    client.on('stopped', () => {
+      state.everStopped = true;
+    });
+    client.on('breakpoint', (msg: { body?: { breakpoint?: { id?: number; verified?: boolean; line?: number; source?: { path?: string } } } }) => {
+      const bp = msg.body?.breakpoint;
+      if (!bp || bp.id === undefined) return;
+      const key = String(bp.id);
+      const prev = state.breakpoints.get(key);
+      const line = bp.line ?? prev?.line;
+      if (line === undefined) return;
+      state.breakpoints.set(key, {
+        line,
+        path: bp.source?.path ?? prev?.path,
+        verified: bp.verified ?? prev?.verified ?? true,
+      });
+    });
+  }
+
+  /**
+   * The result of a resume that ended in `terminated`. A run to the end after a stop, or with no
+   * breakpoints, is ordinary. Breakpoints that were never hit usually mean the library did not
+   * compile or evaluate (the debug launch reports nothing in that case), or that a breakpoint sat
+   * on a line the LS cannot stop on; so the unverified breakpoints are listed, and the launch's
+   * request is re-run through executeCql to collect its Error entries.
+   */
+  private async terminatedResult(state: SessionState): Promise<DapStopEvent> {
+    if (state.everStopped) {
+      return { event: 'terminated' };
+    }
+    if (state.breakpoints.size === 0) {
+      return { event: 'terminated', note: 'terminated (no breakpoints set)' };
+    }
+    const result: DapStopEvent = {
+      event: 'terminated',
+      note:
+        'terminated without stopping: no breakpoint was hit. Check unverifiedBreakpoints (put breakpoints ' +
+        'on an expression line, not the `define` line) and errors (from re-running the library).',
+      unverifiedBreakpoints: [...state.breakpoints.values()]
+        .filter((bp) => !bp.verified)
+        .map((bp) => ({ line: bp.line, path: bp.path })),
+    };
+    try {
+      result.errors = await this.launchErrors(state.launch);
+    } catch (err) {
+      result.errorsUnavailable = err instanceof Error ? err.message : String(err);
+    }
+    return result;
+  }
+
+  /** Error entries from evaluating the launch's request (same LS evaluator, same request shape). */
+  private async launchErrors(launch: DebugLaunchArgs): Promise<string[]> {
+    const cqlFile = path.resolve(launch.cqlFile);
+    await this.ls.ensureReady();
+    openCqlFile(this.ls.lspClient, cqlFile);
+    const request = buildExecuteCqlRequest({
+      cqlFile,
+      fhirVersion: launch.fhirVersion,
+      contextValues: launch.testCaseName ? [launch.testCaseName] : undefined,
+      modelUri: launch.testCaseDir,
+      rootDir: launch.rootDir,
+      terminologyUri: launch.terminologyUri,
+      optionsPath: launch.optionsPath,
+    });
+    const response = (await this.ls.executeCommand(EXECUTE_CQL, [request])) as ExecuteCqlResponse;
+    return response.results.flatMap((r) => r.expressions.filter((e) => e.name === 'Error').map((e) => e.value));
   }
 
   /**
@@ -270,6 +450,15 @@ export class DapSession {
     // parent directory as `executeCql` requires). CqlDebugServer.kt
     // internally derives the directory via Uris.getHead. Single file path
     // from the caller, two shapes computed internally.
+    //
+    // rootDir, terminologyUri and optionsPath default from the file's IG, as for executeCql
+    // (igDefaultsFor); without rootDir an IG library fails to compile and the session just
+    // terminates. The default-layout paths are only sent when they exist.
+    const ig = igDefaultsFor(path.resolve(args.cqlFile));
+    const existing = (p: string | undefined): string | undefined => (p && fs.existsSync(p) ? p : undefined);
+    const rootDir = args.rootDir ?? ig.rootDir;
+    const terminologyUri = args.terminologyUri ?? existing(ig.terminologyUri);
+    const optionsPath = args.optionsPath ?? existing(ig.optionsPath);
     const out: Record<string, unknown> = {
       libraryUri: pathToUri(args.cqlFile),
       libraryName: libraryNameOf(args.cqlFile),
@@ -278,9 +467,9 @@ export class DapSession {
     };
     if (args.testCaseName) out.testCaseName = args.testCaseName;
     if (args.testCaseDir) out.testCaseUri = pathToUri(args.testCaseDir);
-    if (args.terminologyUri) out.terminologyUri = pathToUri(args.terminologyUri);
-    if (args.rootDir) out.rootDir = pathToUri(args.rootDir);
-    if (args.optionsPath) out.optionsPath = pathToUri(args.optionsPath);
+    if (terminologyUri) out.terminologyUri = pathToUri(terminologyUri);
+    if (rootDir) out.rootDir = pathToUri(rootDir);
+    if (optionsPath) out.optionsPath = pathToUri(optionsPath);
     if (args.parameters) out.parameters = args.parameters;
     return out;
   }
@@ -305,6 +494,7 @@ export class DapSession {
   ): Promise<DapStopEvent> {
     this.assertActive();
     const client = this.client!;
+    const state = this.state;
     const wait = timeoutMs ?? this.defaultResumeTimeoutMs;
     const myGeneration = ++this.resumeGeneration;
     const isCurrent = (): boolean => myGeneration === this.resumeGeneration;
@@ -329,11 +519,11 @@ export class DapSession {
           resolve({ event: 'stopped', reason, threadId: tid });
         }
       };
-      const onTerminated = (): void => {
+      const onTerminated = async (): Promise<void> => {
         if (settled || !isCurrent()) return;
         settled = true;
         cleanup();
-        resolve({ event: 'terminated' });
+        resolve(state ? await this.terminatedResult(state) : { event: 'terminated' });
       };
       const timer = setTimeout(() => {
         if (settled || !isCurrent()) return;
