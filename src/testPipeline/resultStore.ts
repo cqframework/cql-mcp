@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { RunRecord, RunSummary } from './testCaseModel.js';
 import {
+  fsSafeTimestamp,
   latestPointerPath,
   previousPointerPath,
   runRecordPath,
@@ -127,6 +128,15 @@ function readPointerFile(filePath: string): PointerRecord | null {
  */
 const RUN_FILE_RE = /^(.*)-([0-9a-fA-F]{8})\.json$/;
 
+/**
+ * Comparison form of a timestamp or timestamp ref. Current run files use the fs-safe form
+ * (`2026-09-10T095126906Z`), older ones the ISO form (`2026-09-10T04:56:52.642Z`), and callers may
+ * pass either, in any case; all of them compare equal after this.
+ */
+function timestampKey(t: string): string {
+  return fsSafeTimestamp(t).toUpperCase();
+}
+
 export class AmbiguousRunRefError extends Error {
   constructor(
     public readonly ref: string,
@@ -149,8 +159,9 @@ export class AmbiguousRunRefError extends Error {
  *   `AmbiguousRunRefError`. If multiple match a full 64-char hash (i.e. two
  *   runs share the same 8-char prefix), disambiguate by parsing each candidate
  *   and comparing its stored `run.hash` field for exact equality.
- * - For a non-hex (ISO timestamp) input, match by exact timestamp prefix on
- *   the captured timestamp group.
+ * - For a non-hex (timestamp) input, match by timestamp prefix on the
+ *   captured timestamp group, comparing fs-safe and ISO forms in any case
+ *   as equal (see timestampKey).
  *
  * Returns null if no match found.
  */
@@ -179,7 +190,7 @@ export function loadRun(
         continue;
       }
     } else {
-      if (!timestamp.startsWith(hashOrTimestamp)) {
+      if (!timestampKey(timestamp).startsWith(timestampKey(hashOrTimestamp))) {
         continue;
       }
     }

@@ -36,6 +36,8 @@ export interface RunFileArgs {
   rootDir?: string;
   libraryVersion?: string | null;
   suiteName?: string;
+  /** Directory of FHIR resources to evaluate against. Without it no patient data is read. */
+  modelUri?: string;
 }
 
 export interface RunSuiteArgs {
@@ -45,6 +47,10 @@ export interface RunSuiteArgs {
   suiteName: string;
   configPath?: string | null;
   excludeTestCases?: string[];
+  /** Overrides for the IG defaults derived from cqlFile (see igDefaultsFor). */
+  rootDir?: string;
+  terminologyUri?: string;
+  optionsPath?: string;
 }
 
 export interface SuiteRunnerDeps {
@@ -83,6 +89,7 @@ export async function runFile(
     optionsPath: args.optionsPath,
     rootDir: args.rootDir,
     libraryVersion: resolvedLibraryVersion,
+    modelUri: args.modelUri,
   };
 
   await deps.process.ensureReady();
@@ -169,7 +176,7 @@ export async function runSuite(
       ? resolveParameters(config.parameters, libraryName, libraryVersion, patientId)
       : [];
     try {
-      const result = await runSingleCase(deps, args.cqlFile, patientId, caseParams, fhirVersion);
+      const result = await runSingleCase(deps, args, testCase, patientId, caseParams, fhirVersion);
       cases.push(result);
     } catch (err) {
       if (err instanceof LanguageServerCrashedError) {
@@ -214,18 +221,27 @@ export async function runSuite(
 
 async function runSingleCase(
   deps: SuiteRunnerDeps,
-  cqlFile: string,
+  args: RunSuiteArgs,
+  testCase: TestCase,
   patientId: string,
   caseParams: ParameterEntry[],
   fhirVersion: string,
 ): Promise<RunCaseResult> {
+  const cqlFile = args.cqlFile;
   await deps.process.ensureReady();
+  // The case folder is the data model. rootDir, terminologyUri and optionsPath default from the
+  // IG (buildExecuteCqlRequest); without rootDir an IG library fails to compile, and without the
+  // model it evaluates against no patient data.
   const request = buildExecuteCqlRequest({
     cqlFile,
     fhirVersion,
     contextValues: [patientId],
     parameters: caseParams.map((p) => ({ name: p.name, type: p.type, value: p.value })),
     libraryVersion: extractLibraryVersion(cqlFile) ?? null,
+    modelUri: testCase.path,
+    rootDir: args.rootDir,
+    terminologyUri: args.terminologyUri,
+    optionsPath: args.optionsPath,
   });
   // Mirror the editor behavior the VS Code extension provides for free:
   // the LS's FederatedLibrarySourceProvider resolves the CQL source through

@@ -84,6 +84,33 @@ Java is discovered via `JAVA_HOME` then `PATH`; needs JDK >= 17.
 | `cql_test_list_runs` | Newest-first listing; optional `suiteName` filter plus `limit` |
 | `cql_test_diff` | Diff two persisted runs by hash or pointer (`latest` / `previous`) |
 
+## Project layout (IG Publisher default)
+
+CQL files are expected in the HL7 IG Publisher default layout, the only layout the VS Code CQL extension supports:
+
+```text
+<root>/
+  ig.ini                                  # publisher root marker; may also sit in an ancestor of <root>
+  input/cql/*.cql                         # path-binary = input/cql (the default)
+  input/cql/cql-options.json              # default-layout CQL options
+  input/vocabulary/valueset/              # default-layout value sets
+  input/tests/<Library>/<case>/*.json     # CQF test-case convention (not a publisher parameter)
+```
+
+For a `.cql` file in `<root>/input/cql/` with an `ig.ini` at `<root>` or above, `cql_execute`, `cql_test_run_file` and `cql_test_run_suite` send:
+
+| Field | Default | Why |
+|---|---|---|
+| `rootDir` | `<root>` | The LS finds `ig.ini` from here and loads the IG's packages. Without it, IG libraries fail to compile (for example `Could not load model information for model USQualityCore`). |
+| `terminologyUri` | `<root>/input/vocabulary/valueset` (if it exists) | Default-layout value sets |
+| `optionsPath` | `<root>/input/cql/cql-options.json` (if it exists) | Default-layout CQL options |
+
+Explicit arguments override each default. Files outside an `input/cql` folder (for example a scratch probe in `<root>/temp/`) get no `rootDir`, as before. A probe folder that has its own `input/cql` inside an IG (for example `<root>/temp/probe/input/cql/X.cql`) gets the probe folder as `rootDir`, and the LS then finds the enclosing IG's `ig.ini`, so the probe runs in that IG's context. A non-default `path-binary` is not supported: pass `rootDir` explicitly.
+
+`cql_test_run_suite` also sends each test-case folder as the data model, so every case is evaluated against its own FHIR resources. `cql_test_run_file` reads patient data only when `modelUri` is set.
+
+Case status in a run record: `passed` means evaluated with no `Error` entries, `failed` means the LS returned `Error` entries (such as compile errors), `errored` means the LS crashed on that case, and `skipped` means not run after a crash. Status is not a comparison against expected results.
+
 ## On-disk layout
 
 Run records and per-suite pointers are stored under `<workspaceRoot>/.cql-debug/test-runs/`:

@@ -155,6 +155,7 @@ export class DapSession {
       const cfgP = client.send('configurationDone', {});
       await Promise.all([launchP, cfgP]);
       this.client = client;
+      this.endWhenFinished(client);
       log.info('DAP session launched', { cqlFile: args.cqlFile });
     } catch (err) {
       await client.dispose();
@@ -239,6 +240,29 @@ export class DapSession {
     }
     await client.dispose();
     log.info('DAP session stopped');
+  }
+
+  /**
+   * Ends the session once the debuggee is done or the DAP connection is gone, so `isActive` goes
+   * false and cql_debug_start works again without a cql_debug_stop first. On `terminated`/`exited`
+   * the session is stopped normally (DAP expects the client to send `disconnect`). On socket close
+   * (for example the language server went away) there is no one to disconnect from, so the client
+   * is just disposed. Events from an earlier session's client are ignored.
+   */
+  private endWhenFinished(client: DapClient): void {
+    const onDone = (): void => {
+      if (this.client === client) {
+        void this.stop();
+      }
+    };
+    client.once('terminated', onDone);
+    client.once('exited', onDone);
+    client.once('end', () => {
+      if (this.client !== client) return;
+      this.client = null;
+      void client.dispose();
+      log.info('DAP session ended: socket closed');
+    });
   }
 
   private buildLaunchArgs(args: DebugLaunchArgs): Record<string, unknown> {

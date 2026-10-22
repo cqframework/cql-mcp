@@ -128,7 +128,9 @@ export function buildDebugTools(session: DapSession): Tool[] {
       name: 'cql_debug_continue',
       description:
         'Resume execution; blocks until the debuggee stops, terminates, or the optional ' +
-        'timeoutMs elapses. Timeout is NOT an error: the session stays alive and paused.',
+        'timeoutMs elapses. Timeout is NOT an error: the session stays alive and paused. ' +
+        'When the debuggee terminates (or the language server goes away) the session ends by itself, ' +
+        'so cql_debug_start can be called again without cql_debug_stop.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -250,7 +252,9 @@ export function buildDebugTools(session: DapSession): Tool[] {
     },
     {
       name: 'cql_debug_stop',
-      description: 'Disconnect the active DAP session and close the TCP socket.',
+      description:
+        'Disconnect the active DAP session and close the TCP socket. A no-op if the session has ' +
+        'already ended (the debuggee terminated or the language server went away).',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       handler: async () => {
         await session.stop();

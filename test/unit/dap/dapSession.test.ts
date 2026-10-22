@@ -310,6 +310,45 @@ describe('dap/dapSession', () => {
     await stopSessionAndAckDisconnect(setup);
   });
 
+  it('ends the session (and sends disconnect) when the debuggee terminates during a resume', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 1000 });
+    await startSession(setup);
+
+    const promise = setup.session.continue(1);
+    await ackRequest(setup, 'continue', 9310);
+    setup.write({ seq: 9311, type: 'event', event: 'terminated', body: {} });
+    expect((await promise).event).to.equal('terminated');
+    expect(setup.session.isActive).to.equal(false);
+    await ackRequest(setup, 'disconnect', 9312);
+  });
+
+  it('ends the session when the debuggee terminates outside a resume wait', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 1000 });
+    await startSession(setup);
+
+    setup.write({ seq: 9320, type: 'event', event: 'terminated', body: {} });
+    await waitUntil(() => !setup.session.isActive);
+    await ackRequest(setup, 'disconnect', 9321);
+  });
+
+  it('ends the session when the DAP socket closes (e.g. the language server went away)', async () => {
+    const setup = makeFakeDap({ resumeTimeoutMs: 1000 });
+    await startSession(setup);
+
+    setup.server.end();
+    await waitUntil(() => !setup.session.isActive);
+    let message = '';
+    try {
+      await setup.session.continue(1);
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).to.contain('debug session not active');
+    // Nothing to stop: cql_debug_stop is a no-op once the session has ended.
+    await setup.session.stop();
+    expect(setup.sent.some((m) => (m as { command?: string }).command === 'disconnect')).to.equal(false);
+  });
+
   it('continue resolves with timeout when no event arrives before deadline', async () => {
     const setup = makeFakeDap({ resumeTimeoutMs: 40 });
     await startSession(setup);

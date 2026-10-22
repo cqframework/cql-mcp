@@ -401,6 +401,52 @@ describe('testPipeline/resultStore', () => {
     });
   });
 
+  describe('loadRun — timestamp refs', () => {
+    // Run files are named <fsSafeTimestamp>-<hash8>.json (no ':' or '.'); runs saved before that
+    // change kept the ISO form. A ref may be given in either form, in any case, or as a prefix.
+    //
+    // | Stored timestamp            | Ref                          | Match |
+    // | --------------------------- | ---------------------------- | ----- |
+    // | 2026-09-10T095126906Z       | 2026-09-10T095126906Z        | yes   |
+    // | 2026-09-10T095126906Z       | 2026-09-10T09:51:26.906Z     | yes   |
+    // | 2026-09-10T095126906Z       | 2026-09-10t095126906z        | yes   |
+    // | 2026-09-10T095126906Z       | 2026-09-10T09:51             | yes   |
+    // | 2026-09-10T04:56:52.642Z    | 2026-09-10T04:56:52.642Z     | yes   |
+    // | 2026-09-10T04:56:52.642Z    | 2026-09-10T045652642Z        | yes   |
+    const NEW = fsSafeTimestamp('2026-09-10T09:51:26.906Z');
+
+    it('finds a run by its fs-safe timestamp, by the ISO form, in any case, and by prefix', () => {
+      const root = mkRoot();
+      try {
+        const hash = 'a1b2c3d4'.repeat(8);
+        saveRun(root, mkRun({ timestamp: NEW, hash }));
+        for (const ref of [NEW, '2026-09-10T09:51:26.906Z', NEW.toLowerCase(), '2026-09-10T09:51']) {
+          expect(loadRun(root, ref)?.hash, ref).to.equal(hash);
+        }
+        expect(loadRun(root, '2026-09-10T09:52')).to.equal(null);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('finds a run saved under the old ISO filename by either timestamp form', function () {
+      // ':' is not allowed in Windows filenames, so the old-format file cannot exist there.
+      if (process.platform === 'win32') this.skip();
+      const root = mkRoot();
+      try {
+        const hash = 'e5f6a7b8'.repeat(8);
+        const iso = '2026-09-10T04:56:52.642Z';
+        const dir = path.dirname(runRecordPath(root, iso, hash));
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, `${iso}-${hash.slice(0, 8)}.json`), JSON.stringify(mkRun({ timestamp: iso, hash })));
+        expect(loadRun(root, iso)?.hash).to.equal(hash);
+        expect(loadRun(root, '2026-09-10T045652642Z')?.hash).to.equal(hash);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('pruneOldRuns — per-suite scope and pointer protection', () => {
     it('prunes each suite independently when no suiteName is given', () => {
       const root = mkRoot();

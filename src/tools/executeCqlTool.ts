@@ -8,7 +8,7 @@ import type {
   LibraryResult,
 } from '../lsp/protocol.js';
 import { libraryNameOf, pathToUri } from '../workspace/paths.js';
-import { ensureWorkspaceFolder, syncCqlDocument } from '../lsp/documentSync.js';
+import { ensureWorkspaceFolder, igRootOf, syncCqlDocument } from '../lsp/documentSync.js';
 import { missing, expectString } from './defs.js';
 import type { Tool } from './defs.js';
 
@@ -32,14 +32,57 @@ export function existsElseNull(p: string | undefined): string | null {
   return fs.existsSync(p) ? pathToUri(path.resolve(p)) : null;
 }
 
+export interface ModelFs {
+  existsSync(p: string): boolean;
+  realpathSync(p: string): string;
+}
+
+/**
+ * The data model for a directory of FHIR resources (for example a test-case folder), or null when
+ * the directory is missing. Symlinks are resolved because the LS's IgStandardRepository walks the
+ * directory with Files.walk, which does not follow them.
+ */
+export function modelFor(
+  modelUri: string | undefined,
+  modelName = 'FHIR',
+  fsImpl: ModelFs = fs,
+): { modelName: string; modelUri: string } | null {
+  if (!modelUri || !fsImpl.existsSync(modelUri)) {
+    return null;
+  }
+  return { modelName, modelUri: pathToUri(fsImpl.realpathSync(modelUri)) };
+}
+
+/**
+ * Defaults for a file in an IG Publisher default layout (see igRootOf): the IG root, and the
+ * default-layout locations of its value sets (input/vocabulary/valueset) and CQL options
+ * (input/cql/cql-options.json). Empty when the file is not in such an IG.
+ */
+export function igDefaultsFor(cqlFile: string): Pick<CqlExecuteToolArgs, 'rootDir' | 'terminologyUri' | 'optionsPath'> {
+  const root = igRootOf(cqlFile);
+  if (!root) {
+    return {};
+  }
+  return {
+    rootDir: root,
+    terminologyUri: path.join(root, 'input', 'vocabulary', 'valueset'),
+    optionsPath: path.join(root, 'input', 'cql', 'cql-options.json'),
+  };
+}
+
 /**
  * Mirrors buildRequest() from vscode-cql/src/cql-service/cqlService.executeCql.ts
- * but takes plain filesystem paths and only models a single library.
+ * but takes plain filesystem paths and only models a single library. rootDir, terminologyUri and
+ * optionsPath default from the file's IG (igDefaultsFor); explicit arguments override them.
  */
 export function buildExecuteCqlRequest(args: CqlExecuteToolArgs): ExecuteCqlRequest {
   const cqlFile = path.resolve(args.cqlFile);
   const libraryName = libraryNameOf(cqlFile);
   const libraryUri = pathToUri(path.dirname(cqlFile));
+  const ig = igDefaultsFor(cqlFile);
+  const rootDir = args.rootDir ?? ig.rootDir;
+  const terminologyUri = args.terminologyUri ?? ig.terminologyUri;
+  const optionsPath = args.optionsPath ?? ig.optionsPath;
 
   const parameters = (args.parameters ?? []).map((p) => ({
     parameterName: p.name,
@@ -49,19 +92,13 @@ export function buildExecuteCqlRequest(args: CqlExecuteToolArgs): ExecuteCqlRequ
 
   const values = args.contextValues && args.contextValues.length > 0 ? args.contextValues : [undefined];
 
-  const model =
-    args.modelUri && fs.existsSync(args.modelUri)
-      ? {
-          modelName: args.modelName ?? 'FHIR',
-          modelUri: pathToUri(fs.realpathSync(args.modelUri)),
-        }
-      : null;
+  const model = modelFor(args.modelUri, args.modelName);
 
   const libraries = values.map((contextValue) => ({
     libraryName,
     libraryUri,
     libraryVersion: args.libraryVersion ?? null,
-    terminologyUri: existsElseNull(args.terminologyUri),
+    terminologyUri: existsElseNull(terminologyUri),
     model,
     context: contextValue ? { contextName: 'Patient', contextValue } : null,
     parameters,
@@ -69,8 +106,8 @@ export function buildExecuteCqlRequest(args: CqlExecuteToolArgs): ExecuteCqlRequ
 
   return {
     fhirVersion: args.fhirVersion ?? 'R4',
-    rootDir: args.rootDir ? pathToUri(path.resolve(args.rootDir)) : null,
-    optionsPath: existsElseNull(args.optionsPath),
+    rootDir: rootDir ? pathToUri(path.resolve(rootDir)) : null,
+    optionsPath: existsElseNull(optionsPath),
     libraries,
   };
 }
@@ -117,7 +154,11 @@ export const executeCqlTool: Tool = {
   description:
     'Execute a single CQL library against the language server and return expression results. ' +
     'Compiler/runtime errors are returned as diagnostics with success=false (not a transport error). ' +
-    'Provide contextValues to run one library request per patient/context value.',
+    'Provide contextValues to run one library request per patient/context value. ' +
+    'For a file in the IG Publisher default layout (<root>/input/cql/*.cql with an ig.ini at <root> or ' +
+    'above), rootDir, terminologyUri and optionsPath default to <root> and the default-layout paths ' +
+    '<root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json; explicit arguments override. ' +
+    'Other files get no rootDir. Patient data is only read when modelUri is set.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -144,9 +185,19 @@ export const executeCqlTool: Tool = {
           required: ['name', 'value'],
         },
       },
-      terminologyUri: { type: 'string', description: 'Path to a terminology directory/file' },
-      optionsPath: { type: 'string', description: 'Path to a cql-options file' },
-      rootDir: { type: 'string', description: 'Project root directory' },
+      terminologyUri: {
+        type: 'string',
+        description: 'Path to a terminology directory/file. Defaults to <IG root>/input/vocabulary/valueset.',
+      },
+      optionsPath: {
+        type: 'string',
+        description: 'Path to a cql-options file. Defaults to <IG root>/input/cql/cql-options.json.',
+      },
+      rootDir: {
+        type: 'string',
+        description:
+          'IG project root (where the LS finds ig.ini and loads IG packages). Defaults to the IG root of cqlFile; none outside an IG.',
+      },
       libraryVersion: { type: 'string' },
       modelUri: {
         type: 'string',

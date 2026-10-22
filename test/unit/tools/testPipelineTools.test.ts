@@ -225,6 +225,43 @@ describe('tools/testPipelineTools', () => {
       }
     });
 
+    it('diffs two runs referenced by timestamp, and accepts pointer keywords in any case', async () => {
+      const root = mkRoot();
+      const cqlFile = path.join(root, 'L.cql');
+      fs.writeFileSync(cqlFile, 'library L version "1.0.0"');
+      try {
+        const run = (values: string[]) =>
+          runFileTool.handler(
+            mkContext({
+              workspaceRoot: root,
+              fanOutPerQueueItem: true,
+              queue: values.map((value) => ({ expressions: [{ name: 'X', value }] })),
+            }),
+            { cqlFile, contextValues: values.map((_, i) => `p${i + 1}`), suiteName: 'L' },
+          ) as Promise<{ timestamp: string }>;
+        const first = await run(['1']);
+        await new Promise((r) => setTimeout(r, 5));
+        const second = await run(['2', '3']);
+        const ctx = mkContext({ workspaceRoot: root });
+
+        const byTimestamp = (await diffTool.handler(ctx, {
+          suiteName: 'L',
+          runA: first.timestamp,
+          runB: second.timestamp,
+        })) as { added: Array<{ patientId: string }> };
+        expect(byTimestamp.added.map((c) => c.patientId)).to.deep.equal(['p2']);
+
+        const byKeyword = (await diffTool.handler(ctx, {
+          suiteName: 'L',
+          runA: 'Previous',
+          runB: 'LATEST',
+        })) as { added: Array<{ patientId: string }> };
+        expect(byKeyword.added.map((c) => c.patientId)).to.deep.equal(['p2']);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it('diffs two persisted runs (latest vs previous)', async () => {
       const root = mkRoot();
       const cqlFile = path.join(root, 'L.cql');

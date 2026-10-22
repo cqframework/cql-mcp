@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   ensureWorkspaceFolder,
+  igRootOf,
   isUnder,
   pathKey,
   projectRootOf,
@@ -47,6 +48,55 @@ describe('documentSync', () => {
       expect(projectRootOf('/tmp/scratch/X.cql')).to.equal('/tmp/scratch');
       expect(projectRootOf('C:\\tmp\\scratch\\X.cql')).to.equal('C:\\tmp\\scratch');
       expect(projectRootOf('C:/tmp/scratch/X.cql')).to.equal('C:/tmp/scratch');
+    });
+  });
+
+  describe('igRootOf', () => {
+    // `exists` is injected so every path form runs on any host; it reports which ig.ini paths exist.
+    //
+    // | Form                  | Input                          | ig.ini at        | Expected   |
+    // | --------------------- | ------------------------------ | ---------------- | ---------- |
+    // | macOS / Linux         | /a/proj/input/cql/X.cql        | /a/proj          | /a/proj    |
+    // | Windows backslash     | C:\a\proj\input\cql\X.cql      | C:\a\proj        | C:\a\proj  |
+    // | Windows forward slash | C:/a/proj/input/cql/X.cql      | C:/a/proj        | C:/a/proj  |
+    // | Ancestor ig.ini       | /a/ws/proj/input/cql/X.cql     | /a/ws            | /a/ws/proj |
+    // | No ig.ini anywhere    | /a/proj/input/cql/X.cql        | (none)           | null       |
+    // | No input/cql layout   | /a/proj/temp/probe/X.cql       | /a/proj          | null       |
+    // | Probe with input/cql  | /a/proj/temp/probe/input/cql/X.cql | /a/proj      | /a/proj/temp/probe |
+    const only = (...present: string[]) => (p: string) => present.includes(p);
+
+    it('returns the project root when ig.ini sits beside input/ on POSIX paths', () => {
+      expect(igRootOf('/a/proj/input/cql/X.cql', only('/a/proj/ig.ini'))).to.equal('/a/proj');
+    });
+    it('returns the project root on Windows backslash paths', () => {
+      expect(igRootOf('C:\\a\\proj\\input\\cql\\X.cql', only('C:\\a\\proj\\ig.ini'))).to.equal('C:\\a\\proj');
+    });
+    it('returns the project root on Windows forward-slash paths', () => {
+      expect(igRootOf('C:/a/proj/input/cql/X.cql', only('C:/a/proj/ig.ini'))).to.equal('C:/a/proj');
+    });
+    it('returns the project root when ig.ini is in an ancestor (multi-project layout)', () => {
+      expect(igRootOf('/a/ws/proj/input/cql/X.cql', only('/a/ws/ig.ini'))).to.equal('/a/ws/proj');
+      expect(igRootOf('C:\\ws\\proj\\input\\cql\\X.cql', only('C:\\ig.ini'))).to.equal('C:\\ws\\proj');
+      expect(igRootOf('/ws/proj/input/cql/X.cql', only('/ig.ini'))).to.equal('/ws/proj');
+    });
+    it('does not look inside input/ (the server starts its search at the project root)', () => {
+      expect(igRootOf('/a/proj/input/cql/X.cql', only('/a/proj/input/ig.ini'))).to.equal(null);
+    });
+    it('returns null when no ig.ini exists at or above the project root', () => {
+      expect(igRootOf('/a/proj/input/cql/X.cql', only())).to.equal(null);
+      expect(igRootOf('C:/a/proj/input/cql/X.cql', only())).to.equal(null);
+    });
+    it('returns null without an input/cql layout, even inside an IG (scratch probes)', () => {
+      expect(igRootOf('/a/proj/temp/probe/X.cql', only('/a/proj/ig.ini'))).to.equal(null);
+      expect(igRootOf('C:\\a\\proj\\temp\\probe\\X.cql', only('C:\\a\\proj\\ig.ini'))).to.equal(null);
+    });
+    it("gives a probe folder with its own input/cql the enclosing IG's context", () => {
+      // The probe root is sent as rootDir; the server then finds the enclosing IG's ig.ini above it.
+      expect(igRootOf('/a/proj/temp/probe/input/cql/X.cql', only('/a/proj/ig.ini'))).to.equal('/a/proj/temp/probe');
+      expect(igRootOf('C:\\a\\proj\\temp\\probe\\input\\cql\\X.cql', only('C:\\a\\proj\\ig.ini'))).to.equal(
+        'C:\\a\\proj\\temp\\probe',
+      );
+      expect(igRootOf('C:/a/proj/temp/probe/input/cql/X.cql', only('C:/a/proj/ig.ini'))).to.equal('C:/a/proj/temp/probe');
     });
   });
 

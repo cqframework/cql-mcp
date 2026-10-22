@@ -77,15 +77,53 @@ export function isUnder(file: string, folder: string): boolean {
  * the file's own directory. The result keeps the input's separator style.
  */
 export function projectRootOf(cqlFile: string): string {
-  const sep = WINDOWS_FORM.test(cqlFile) && cqlFile.includes('\\') ? '\\' : '/';
+  const sep = separatorOf(cqlFile);
   const parts = cqlFile.split(/[\\/]/);
-  for (let i = parts.length - 2; i >= 1; i--) {
-    if (parts[i] === 'cql' && parts[i - 1] === 'input') {
-      return parts.slice(0, i - 1).join(sep) || sep;
-    }
+  const i = inputCqlIndex(parts);
+  if (i >= 0) {
+    return parts.slice(0, i - 1).join(sep) || sep;
   }
   const dir = parts.slice(0, -1).join(sep);
   return dir || sep;
+}
+
+/**
+ * The IG root to send as `rootDir` for a CQL file, or null.
+ *
+ * Supports the IG Publisher default layout (`path-binary` = `input/cql`), the only layout the
+ * VS Code CQL extension supports, so the file must sit in `…/input/cql/…`; `path-binary` is not
+ * parsed. `ig.ini` is the publisher's root marker, and this mirrors the server's own lookup
+ * (IgContextManager.findIgContext), which looks for it at the project root and then in each
+ * ancestor. Without `rootDir` the server loads no IG packages, so modelinfo such as USQualityCore
+ * and IG namespaces fail to resolve. The result keeps the input's separator style.
+ */
+export function igRootOf(cqlFile: string, exists: (p: string) => boolean = fs.existsSync): string | null {
+  const sep = separatorOf(cqlFile);
+  const parts = cqlFile.split(/[\\/]/);
+  const i = inputCqlIndex(parts);
+  if (i < 0) {
+    return null;
+  }
+  for (let k = i - 1; k >= 1; k--) {
+    if (exists(`${parts.slice(0, k).join(sep)}${sep}ig.ini`)) {
+      return projectRootOf(cqlFile);
+    }
+  }
+  return null;
+}
+
+function separatorOf(p: string): string {
+  return WINDOWS_FORM.test(p) && p.includes('\\') ? '\\' : '/';
+}
+
+/** Index of `cql` in the innermost `input/cql` pair of a split path, or -1 when there is none. */
+function inputCqlIndex(parts: string[]): number {
+  for (let i = parts.length - 2; i >= 1; i--) {
+    if (parts[i] === 'cql' && parts[i - 1] === 'input') {
+      return i;
+    }
+  }
+  return -1;
 }
 
 /** Record a folder the server already knows about (for example, the one passed to `initialize`). */

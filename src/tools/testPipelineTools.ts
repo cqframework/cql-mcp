@@ -11,6 +11,17 @@ import { runFile, runSuite } from '../testPipeline/suiteRunner.js';
 import type { Tool } from './defs.js';
 import { missing, expectString } from './defs.js';
 
+// Shared by both run tools so callers read the status the way it is computed (suiteRunner.toCaseResult).
+const CASE_STATUS_NOTE =
+  'Case status: passed = evaluated with no Error entries; failed = the language server returned Error ' +
+  'entries (e.g. compile errors); errored = the language server crashed on this case; skipped = not run ' +
+  'after a crash. Status is NOT a comparison against expected results (MeasureReport / TestCaseResult).';
+
+const IG_DEFAULTS_NOTE =
+  'For a cqlFile in the IG Publisher default layout (<root>/input/cql/*.cql with an ig.ini at <root> or ' +
+  'above), rootDir, terminologyUri and optionsPath default to <root> and the default-layout paths ' +
+  '<root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json; explicit arguments override.';
+
 function ensureDeps(process: CqlLsProcess, workspaceRoot: string) {
   return { process, workspaceRoot };
 }
@@ -31,7 +42,11 @@ export const runFileTool: Tool = {
   description:
     'Run a single CQL file against one or more context values (one library request per value), ' +
     'persist the result, and update the latest/previous pointer for the suite. ' +
-    'Returns the persisted RunRecord (counts + per-case results).',
+    'Returns the persisted RunRecord (counts + per-case results). Patient data is only read when modelUri ' +
+    'is set (use cql_test_run_suite for test-case folders). ' +
+    IG_DEFAULTS_NOTE +
+    ' ' +
+    CASE_STATUS_NOTE,
   inputSchema: {
     type: 'object',
     properties: {
@@ -54,6 +69,10 @@ export const runFileTool: Tool = {
       optionsPath: { type: 'string' },
       rootDir: { type: 'string' },
       libraryVersion: { type: 'string' },
+      modelUri: {
+        type: 'string',
+        description: 'Directory of FHIR resources (e.g. one test-case folder) to evaluate against.',
+      },
       suiteName: {
         type: 'string',
         description:
@@ -79,6 +98,7 @@ export const runFileTool: Tool = {
       rootDir: args.rootDir as string | undefined,
       libraryVersion: (args.libraryVersion as string | null | undefined) ?? null,
       suiteName: args.suiteName as string | undefined,
+      modelUri: args.modelUri ? path.resolve(args.modelUri as string) : undefined,
     });
   },
 };
@@ -88,7 +108,11 @@ export const runSuiteTool: Tool = {
   description:
     'Discover test cases under `<suiteRoot>/<suiteName>/<patient-uuid>/` (Layout A), merge per-case ' +
     'parameters from a config.jsonc file (with caller-supplied exclusions unioned in), run each case, ' +
-    'persist the result, and update the latest/previous pointer. The `shared` directory is always excluded.',
+    'persist the result, and update the latest/previous pointer. The `shared` directory is always excluded. ' +
+    "Each case is evaluated against its own folder's FHIR resources. " +
+    IG_DEFAULTS_NOTE +
+    ' ' +
+    CASE_STATUS_NOTE,
   inputSchema: {
     type: 'object',
     properties: {
@@ -110,6 +134,15 @@ export const runSuiteTool: Tool = {
         description: 'Test case (subdirectory) names to exclude; unioned with config.testCasesToExclude.',
       },
       fhirVersion: { type: 'string', description: 'FHIR version (default R4)', default: 'R4' },
+      rootDir: { type: 'string', description: 'IG project root. Defaults to the IG root of cqlFile.' },
+      terminologyUri: {
+        type: 'string',
+        description: 'Terminology directory. Defaults to <IG root>/input/vocabulary/valueset.',
+      },
+      optionsPath: {
+        type: 'string',
+        description: 'cql-options file. Defaults to <IG root>/input/cql/cql-options.json.',
+      },
       workspaceRoot: COMMON_PROPS(null).workspaceRoot,
     },
     required: ['cqlFile', 'suiteRoot', 'suiteName'],
@@ -131,6 +164,9 @@ export const runSuiteTool: Tool = {
       suiteName,
       configPath,
       excludeTestCases: args.excludeTestCases as string[] | undefined,
+      rootDir: args.rootDir as string | undefined,
+      terminologyUri: args.terminologyUri as string | undefined,
+      optionsPath: args.optionsPath as string | undefined,
     });
   },
 };
@@ -179,12 +215,14 @@ export const diffTool: Tool = {
       runA: {
         type: 'string',
         description:
-          'Hash prefix (8+ chars) or ISO timestamp of the first run. Use "latest" or "previous" to use pointer files.',
+          'Hash prefix (8+ chars) or timestamp (or timestamp prefix) of the first run, as listed by cql_test_list_runs ' +
+          '(ISO form with ":" and "." also accepted, any case). Use "latest" or "previous" to use pointer files.',
       },
       runB: {
         type: 'string',
         description:
-          'Hash prefix (8+ chars) or ISO timestamp of the second run. Use "latest" or "previous" to use pointer files.',
+          'Hash prefix (8+ chars) or timestamp (or timestamp prefix) of the second run, as listed by cql_test_list_runs ' +
+          '(ISO form with ":" and "." also accepted, any case). Use "latest" or "previous" to use pointer files.',
       },
       workspaceRoot: COMMON_PROPS(null).workspaceRoot,
     },
@@ -198,14 +236,17 @@ export const diffTool: Tool = {
     if (typeErr) throw new Error(typeErr);
     const workspaceRoot = (args.workspaceRoot as string | undefined) ?? ctx.workspaceRoot;
 
-    const refA = (args.runA as string).trim().toLowerCase();
-    const refB = (args.runB as string).trim().toLowerCase();
+    const refA = (args.runA as string).trim();
+    const refB = (args.runB as string).trim();
 
+    // Only the pointer keywords are case-insensitive here; hashes and timestamps go to loadRun
+    // as given, which does its own case-insensitive matching.
     const resolveRef = (ref: string): string | null => {
-      if (ref === 'latest') {
+      const keyword = ref.toLowerCase();
+      if (keyword === 'latest') {
         return readLatestPointer(workspaceRoot, suiteName)?.hash ?? null;
       }
-      if (ref === 'previous') {
+      if (keyword === 'previous') {
         return readPreviousPointer(workspaceRoot, suiteName)?.hash ?? null;
       }
       return ref; // treat as hash or timestamp
