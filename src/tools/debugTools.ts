@@ -1,6 +1,33 @@
 import type { DapSession, DebugLaunchArgs, StepGranularity } from '../dap/dapSession.js';
+import { GET_VERSION_INFO } from '../lsp/lspCommands.js';
 import { missing } from './defs.js';
-import type { Tool } from './defs.js';
+import type { McpContext, Tool } from './defs.js';
+
+/**
+ * Warning for language servers released before the DebugSession socket-close fix
+ * (cql-language-server bf40a031, 2026-09-17; in 4.11.0-SNAPSHOT builds, in no release yet). Without
+ * it a request made after a session has ended hangs. Null for newer or unparseable versions.
+ */
+export function debugVersionWarning(version: string | null | undefined): string | null {
+  const m = /^(\d+)\.(\d+)\./.exec(version ?? '');
+  if (!m) return null;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  if (major > 4 || (major === 4 && minor >= 11)) return null;
+  return (
+    `LS ${version} predates the DebugSession socket-close fix (cql-language-server bf40a031, ` +
+    '2026-09-17); set CQL_LS_JAR_PATH to a current build for debugging'
+  );
+}
+
+async function languageServerVersion(ctx: McpContext): Promise<string | null> {
+  try {
+    const info = (await ctx.process.executeCommand(GET_VERSION_INFO, [])) as { languageServer?: string };
+    return info.languageServer ?? null;
+  } catch {
+    return null; // best effort: the version only drives a warning
+  }
+}
 
 type StepGranularityResult =
   | { ok: true; value: StepGranularity | undefined }
@@ -98,10 +125,11 @@ export function buildDebugTools(session: DapSession): Tool[] {
         required: ['cqlFile'],
         additionalProperties: false,
       },
-      handler: async (_ctx, args) => {
+      handler: async (ctx, args) => {
         const launchArgs = extractLaunchArgs(args);
         await session.start(launchArgs);
-        return { active: true };
+        const warning = debugVersionWarning(await languageServerVersion(ctx));
+        return warning ? { active: true, warning } : { active: true };
       },
     },
     {

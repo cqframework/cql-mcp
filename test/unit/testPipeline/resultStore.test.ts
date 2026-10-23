@@ -246,6 +246,20 @@ describe('testPipeline/resultStore', () => {
       }
     });
 
+    it('orders runs newest-first across the old ISO and current fs-safe timestamp forms', () => {
+      // Pins current behaviour: listRuns sorts with localeCompare, whose ICU collation gives the
+      // ':' and '.' of old ISO timestamps no weight here, so both forms interleave correctly.
+      const root = mkRoot();
+      try {
+        saveRun(root, mkRun({ timestamp: '2026-09-10T10:23:40.521Z', hash: 'a'.repeat(64) }));
+        saveRun(root, mkRun({ timestamp: '2026-09-10T102518480Z', hash: 'b'.repeat(64) }));
+        saveRun(root, mkRun({ timestamp: '2026-09-10T10:20:00.000Z', hash: 'c'.repeat(64) }));
+        expect(listRuns(root).map((r) => r.hash[0])).to.deep.equal(['b', 'a', 'c']);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it('excludes pointer files from listings', () => {
       const root = mkRoot();
       try {

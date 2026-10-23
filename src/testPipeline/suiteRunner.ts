@@ -15,7 +15,7 @@ import {
   updatePointers,
 } from './resultStore.js';
 import { buildExclusionSet, loadSuite, getMeasureReportData } from './testCaseLoader.js';
-import { fsSafeTimestamp } from '../workspace/paths.js';
+import { fsSafeTimestamp, libraryNameOf } from '../workspace/paths.js';
 import type {
   CqlParametersConfig,
   ParameterEntry,
@@ -117,7 +117,7 @@ export async function runFile(
     versions: response.versions,
     startedAt,
     cqlParametersConfig: undefined,
-    libraryName: libraryNameOfCqlFile(args.cqlFile),
+    libraryName: libraryNameOf(args.cqlFile),
   });
 
   saveRun(deps.workspaceRoot, run);
@@ -157,7 +157,7 @@ export async function runSuite(
   const cases: RunCaseResult[] = [];
   let crashed = false;
   const fhirVersion = args.fhirVersion ?? 'R4';
-  const libraryName = libraryNameOfCqlFile(args.cqlFile);
+  const libraryName = libraryNameOf(args.cqlFile);
   const libraryVersion = extractLibraryVersion(args.cqlFile);
 
   for (const testCase of discovered) {
@@ -296,11 +296,6 @@ function resolvePatientId(testCase: TestCase): string {
   return data?.patientId ?? testCase.name;
 }
 
-function libraryNameOfCqlFile(cqlFile: string): string {
-  const base = cqlFile.split(/[\\/]/).filter(Boolean).pop() ?? cqlFile;
-  return base.endsWith('.cql') ? base.slice(0, -'.cql'.length) : base;
-}
-
 function extractLibraryVersion(cqlFile: string): string | undefined {
   try {
     const text = fs.readFileSync(cqlFile, 'utf-8');
@@ -311,7 +306,7 @@ function extractLibraryVersion(cqlFile: string): string | undefined {
 }
 
 function defaultSuiteName(cqlFile: string): string {
-  return libraryNameOfCqlFile(cqlFile);
+  return libraryNameOf(cqlFile);
 }
 
 function loadSuiteConfig(
@@ -367,7 +362,7 @@ function persistEmptyRun(
     versions: undefined,
     startedAt,
     cqlParametersConfig: config.parameters,
-    libraryName: libraryNameOfCqlFile(args.cqlFile),
+    libraryName: libraryNameOf(args.cqlFile),
   });
   saveRun(deps.workspaceRoot, run);
   updatePointers(deps.workspaceRoot, args.suiteName, run.hash);

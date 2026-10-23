@@ -1,5 +1,4 @@
 {
   "require": ["source-map-support/register"],
-  "spec": ["dist/test/unit/**/*.test.js"],
   "timeout": 15000
 }

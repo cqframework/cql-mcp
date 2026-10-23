@@ -7,7 +7,7 @@ import type {
   DapVariable,
   DapEvaluationResult,
 } from '../../../src/dap/dapSession.js';
-import { buildDebugTools } from '../../../src/tools/debugTools.js';
+import { buildDebugTools, debugVersionWarning } from '../../../src/tools/debugTools.js';
 
 interface FakeSession extends Pick<
   DapSession,
@@ -102,6 +102,25 @@ describe('debugTools', () => {
     const res = await tool.handler({} as never, { cqlFile: '/x/lib.cql' });
     expect(res).to.deep.equal({ active: true });
     expect(session.startedWith?.cqlFile).to.equal('/x/lib.cql');
+  });
+
+  it('cql_debug_start warns when the language server predates the DebugSession socket-close fix', async () => {
+    const session = makeFakeSession();
+    const tool = findTool('cql_debug_start', session);
+    const ctx = { process: { executeCommand: async () => ({ languageServer: '4.10.0' }) } };
+    const res = (await tool.handler(ctx as never, { cqlFile: '/x/lib.cql' })) as { active: boolean; warning?: string };
+    expect(res.active).to.equal(true);
+    expect(res.warning).to.contain('LS 4.10.0 predates the DebugSession socket-close fix');
+    expect(res.warning).to.contain('CQL_LS_JAR_PATH');
+  });
+
+  it('debugVersionWarning flags only releases up to 4.10.x', () => {
+    for (const v of ['4.10.0', '4.10.3', '4.9.1', '3.2.0']) {
+      expect(debugVersionWarning(v), v).to.be.a('string');
+    }
+    for (const v of ['4.11.0-SNAPSHOT', '4.11.0', '5.0.0', 'unknown', '', null, undefined]) {
+      expect(debugVersionWarning(v as string | null | undefined), String(v)).to.equal(null);
+    }
   });
 
   it('cql_debug_start forwards breakpoints and filters non-positive integers', async () => {

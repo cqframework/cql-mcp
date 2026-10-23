@@ -4,7 +4,7 @@ Standalone MCP server for HL7 CQL: execution, ELM inspection, DAP step-through d
 
 ## Status
 
-Phase 3 (test pipeline: 4 MCP tools + persisted run history + diff) shipped. 203 unit + 7 integration tests green. Smoke test confirms 16 tools registered and end-to-end persistence works.
+All 16 tools are implemented: lifecycle and inspection, DAP step-through debugging, and the test pipeline (persisted run history and diff). Run `npm test` for the current unit and integration results.
 
 ## Quick start
 
@@ -42,7 +42,7 @@ Drives `initialize`, `tools/list`, a `cql_test_run_file` invocation, and a `cql_
 | Var | Default | Purpose |
 |---|---|---|
 | `CQL_LS_JAR_PATH` | (download from Maven Central) | Path to a pre-built `cql-ls-server-*.jar`. Bypasses download. |
-| `CQL_LS_VERSION` | `4.10.0` | Maven version to download if no local jar. |
+| `CQL_LS_VERSION` | `4.10.0` | Maven version to download if no local jar. 4.10.0 is the latest release, but it predates the LS DebugSession socket-close fix (`bf40a031`, 2026-09-17); for debugging, set `CQL_LS_JAR_PATH` to a current 4.11.0-SNAPSHOT build. `cql_debug_start` warns when the LS is older. |
 | `CQL_LS_MAVEN_REPO` | Maven Central | Maven base URL for jar download. |
 | `CQL_DEBUG_MCP_JAR_DIR` | `~/.cql-debug-mcp/jars` | Where downloaded jars are cached. |
 | `CQL_DEBUG_MCP_WORKSPACE` | `process.cwd()` | Workspace root under which `.cql-debug/test-runs/` is stored. |
@@ -130,7 +130,7 @@ Filenames use `fsSafeTimestamp` (strips `:` and `.`) so the same paths work on m
 - **Shutdown:** the server stops its LS JVM and exits when the client closes stdin (the SDK's stdio transport does not report this itself), and on SIGINT/SIGTERM. Shutdown is bounded: 3 s for the LS to answer `shutdown`, then SIGTERM/SIGKILL, and 15 s overall.
 - **LSP/DAP pipes:** JVM stdout is pure LSP framing on its own pipe (read by `vscode-jsonrpc`). DAP uses Content-Length framing on a TCP socket per debug session.
 - **Asymmetry:** `cql_execute` `libraryUri` is the parent dir of the .cql file; DAP `launch` `libraryUri` is the .cql file itself. `cql_debug_start` computes both internally — callers pass the .cql file once.
-- **Out of scope:** This directory is intentionally outside any git checkout (per the original plan). It is not part of the `vscode-cql` or `cql-language-server` repos.
+- **Repository:** This project has its own git repository. It is not part of the `vscode-cql` or `cql-language-server` repos.
 
 ## Prompting agents
 
@@ -252,6 +252,7 @@ point. End with cql_debug_stop.
 
 ### Gotchas
 
+- **LSP channel corrupted at startup.** The LS JVM's stdout is the LSP channel, so anything it prints there before the first LSP frame (for example logback status messages from a broken bundled `logback.xml`) corrupts it and `initialize` fails or hangs. Force a known-good config with `-Dlogback.configurationFile=<path>`; the integration tests do this via `CqlLsProcess`'s `logbackConfigFile` option.
 - **Tool names differ by client.** opencode exposes tools as `cql_*`. Claude Desktop prefixes with `mcp__mcp-cql-debug__cql_*`. Same prompts work for both; just be aware if you see tool names in logs.
 - **`cql_test_run_suite` requires Layout A.** The discovery walks `<suiteRoot>/<suiteName>/<patient-uuid>/`. If your measure stores bundles elsewhere, fall back to looping `cql_test_run_file` over each patient ID.
 - **Workspace root.** `CQL_DEBUG_MCP_WORKSPACE` defaults to `process.cwd()` of the MCP server, not your project. Set it explicitly in the MCP config so `.cql-debug/test-runs/` lands where you expect.
