@@ -17,6 +17,8 @@ import { buildTestPipelineTools } from './tools/testPipelineTools.js';
 import { SERVER_NAME, SERVER_VERSION } from './version.js';
 import { resolveWorkspaceRoot } from './workspace/workspaceConfig.js';
 
+const SHUTDOWN_WATCHDOG_MS = 15_000;
+
 interface ServerHandles {
   process: CqlLsProcess;
   context: McpContext;
@@ -131,8 +133,17 @@ async function start(): Promise<void> {
 
   const handles = { lsProcess, debugSession };
 
+  // Runs once, whichever of the triggers below comes first. The watchdog bounds the whole
+  // sequence (a DAP disconnect or LS shutdown that never answers), so node always exits.
+  let shuttingDown = false;
   const shutdown = (signal: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     log.info(`Received ${signal}; shutting down`);
+    setTimeout(() => {
+      log.error(`Shutdown did not finish within ${SHUTDOWN_WATCHDOG_MS} ms; exiting`);
+      process.exit(1);
+    }, SHUTDOWN_WATCHDOG_MS).unref();
     void handles.debugSession
       .stop()
       .catch((err: unknown) => log.error('Error stopping DAP session', { message: err instanceof Error ? err.message : err }))
@@ -145,6 +156,11 @@ async function start(): Promise<void> {
   };
   process.once('SIGINT', () => shutdown('SIGINT'));
   process.once('SIGTERM', () => shutdown('SIGTERM'));
+  // MCP clients disconnect by closing stdin, but @modelcontextprotocol/sdk 1.30.0's
+  // StdioServerTransport only listens for stdin 'data' and 'error' (dist/esm/server/stdio.js:37-38;
+  // unchanged in 1.32.1), so without this the server and its LS JVM outlive the client.
+  process.stdin.once('end', () => shutdown('stdin end'));
+  process.stdin.once('close', () => shutdown('stdin close'));
   process.once('exit', () => {
     // Best-effort: kill the child if we are about to die unexpectedly.
     void handles.debugSession.stop();

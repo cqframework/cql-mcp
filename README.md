@@ -127,6 +127,7 @@ Filenames use `fsSafeTimestamp` (strips `:` and `.`) so the same paths work on m
 ## Architecture notes
 
 - **MCP transport:** stdio NDJSON, one JSON-RPC message per line. MCP SDK 1.30.0 does not use Content-Length framing.
+- **Shutdown:** the server stops its LS JVM and exits when the client closes stdin (the SDK's stdio transport does not report this itself), and on SIGINT/SIGTERM. Shutdown is bounded: 3 s for the LS to answer `shutdown`, then SIGTERM/SIGKILL, and 15 s overall.
 - **LSP/DAP pipes:** JVM stdout is pure LSP framing on its own pipe (read by `vscode-jsonrpc`). DAP uses Content-Length framing on a TCP socket per debug session.
 - **Asymmetry:** `cql_execute` `libraryUri` is the parent dir of the .cql file; DAP `launch` `libraryUri` is the .cql file itself. `cql_debug_start` computes both internally — callers pass the .cql file once.
 - **Out of scope:** This directory is intentionally outside any git checkout (per the original plan). It is not part of the `vscode-cql` or `cql-language-server` repos.

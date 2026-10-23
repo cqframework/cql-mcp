@@ -44,8 +44,11 @@ interface SpawnHarness {
 function makeHarness(opts?: {
   hangInitialize?: boolean;
   holdExecuteReplies?: boolean;
+  /** The server never answers the LSP `shutdown` request (a wedged JVM). */
+  hangShutdown?: boolean;
 }): SpawnHarness {
   const hangInitialize = opts?.hangInitialize ?? false;
+  const hangShutdown = opts?.hangShutdown ?? false;
   const holdExecuteReplies = opts?.holdExecuteReplies ?? false;
   const children: FakeChild[] = [];
   const servers: MessageConnection[] = [];
@@ -63,7 +66,7 @@ function makeHarness(opts?: {
     // A hanging handler simulates a server that never answers initialize.
     server.onRequest('initialize', () => (hangInitialize ? new Promise(() => undefined) : { capabilities: {} }));
     server.onNotification('initialized', () => undefined);
-    server.onRequest('shutdown', () => null);
+    server.onRequest('shutdown', () => (hangShutdown ? new Promise(() => undefined) : null));
     server.onNotification('exit', () => void child.kill());
     server.onRequest('workspace/executeCommand', (params: { command: string; arguments?: unknown[] }) => {
       const reply = { echo: params.command, nargs: params.arguments?.length ?? 0 };
@@ -230,6 +233,26 @@ describe('jvm/cqlLsProcess', () => {
     expect(limitError?.message).to.include('respawn limit');
     expect(harness.spawnCalls).to.have.length(1);
     await proc.stop();
+  });
+
+  it('stop() does not wait forever when the server never answers shutdown', async () => {
+    const harness = makeHarness({ hangShutdown: true });
+    const proc = new CqlLsProcess({
+      javaPath: '/opt/java',
+      jarPath: '/jars/cql-ls-server.jar',
+      workspacePath: '/work',
+      spawnImpl: harness.spawnImpl,
+      initializeTimeoutMs: 2000,
+      shutdownTimeoutMs: 50,
+    });
+
+    await proc.ensureReady();
+    const t0 = Date.now();
+    await proc.stop();
+    expect(Date.now() - t0).to.be.lessThan(2000);
+    expect(proc.currentState).to.equal('stopped');
+    const child = harness.children[0]!;
+    expect(child.exitCode !== null || child.signalCode !== null).to.equal(true);
   });
 
   it('refuses new work after being stopped', async () => {

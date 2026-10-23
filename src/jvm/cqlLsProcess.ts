@@ -35,16 +35,20 @@ export interface CqlLsProcessOptions {
   logbackConfigFile?: string;
   spawnImpl?: typeof spawn;
   initializeTimeoutMs?: number;
+  /** How long stop() waits for the LSP `shutdown` reply before falling back to exit/SIGTERM/SIGKILL. */
+  shutdownTimeoutMs?: number;
   respawnLimit?: number;
   stderrTailMax?: number;
 }
 
 const DEFAULT_INITIALIZE_TIMEOUT_MS = 30_000;
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 3_000;
 const DEFAULT_RESPAWN_LIMIT = 3;
 const DEFAULT_STDERR_TAIL = 200;
 
 export class CqlLsProcess {
   private readonly initializeTimeoutMs: number;
+  private readonly shutdownTimeoutMs: number;
   private readonly respawnLimit: number;
   private readonly stderrTailMax: number;
 
@@ -59,6 +63,7 @@ export class CqlLsProcess {
 
   constructor(private readonly opts: CqlLsProcessOptions) {
     this.initializeTimeoutMs = opts.initializeTimeoutMs ?? DEFAULT_INITIALIZE_TIMEOUT_MS;
+    this.shutdownTimeoutMs = opts.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
     this.respawnLimit = opts.respawnLimit ?? DEFAULT_RESPAWN_LIMIT;
     this.stderrTailMax = opts.stderrTailMax ?? DEFAULT_STDERR_TAIL;
   }
@@ -276,10 +281,19 @@ export class CqlLsProcess {
     log.info('Shutting down CQL language server');
 
     if (client) {
+      // Bounded: a wedged JVM that never answers must not stop the exit/SIGTERM/SIGKILL fallbacks.
+      let timer: NodeJS.Timeout | undefined;
       try {
-        await client.sendRequest('shutdown');
+        await Promise.race([
+          client.sendRequest('shutdown'),
+          new Promise((resolve) => {
+            timer = setTimeout(resolve, this.shutdownTimeoutMs);
+          }),
+        ]);
       } catch {
         // server may already be down
+      } finally {
+        clearTimeout(timer);
       }
       try {
         client.sendNotification('exit');
