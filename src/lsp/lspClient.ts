@@ -5,11 +5,16 @@ import {
   MessageWriter,
 } from 'vscode-jsonrpc/node';
 import {
+  Diagnostic,
   ExecuteCommandParams,
   ExecuteCommandRequest,
+  PublishDiagnosticsParams,
+  PublishDiagnosticsNotification,
   WorkspaceFolder,
 } from 'vscode-languageserver-protocol';
 import { SERVER_NAME } from '../version.js';
+import { pathToUri, uriToPath } from '../workspace/paths.js';
+import { pathKey } from './documentSync.js';
 
 export class LspClient {
   /**
@@ -23,7 +28,32 @@ export class LspClient {
    */
   private readonly inflight = new Set<Promise<unknown>>();
 
-  private constructor(private readonly connection: MessageConnection) {}
+  /** Cached diagnostics per normalized pathKey. */
+  private readonly diagnostics = new Map<string, Diagnostic[]>();
+
+  /** Listeners notified on each publishDiagnostics event. */
+  private readonly diagnosticListeners = new Set<(key: string, diagnostics: Diagnostic[]) => void>();
+
+  private constructor(private readonly connection: MessageConnection) {
+    this.connection.onNotification(
+      PublishDiagnosticsNotification.type.method,
+      (params: PublishDiagnosticsParams) => {
+        try {
+          const filePath = uriToPath(params.uri);
+          const key = pathKey(filePath);
+          // In LSP, an empty array clears diagnostics for that document (per spec).
+          // We overwrite rather than append so "0 issues" is cached.
+          const list = params.diagnostics ?? [];
+          this.diagnostics.set(key, list);
+          for (const listener of this.diagnosticListeners) {
+            listener(key, list);
+          }
+        } catch {
+          // Ignore malformed URIs
+        }
+      },
+    );
+  }
 
   static create(
     reader: MessageReader,
@@ -42,6 +72,50 @@ export class LspClient {
     listener: (data: [Error, unknown, number | undefined]) => void,
   ): void {
     this.connection.onError(listener);
+  }
+
+  /**
+   * Return the latest diagnostics cached for a file, or undefined if no
+   * publishDiagnostics has been received yet for it.
+   */
+  getDiagnostics(fileOrUri: string): Diagnostic[] | undefined {
+    const filePath = fileOrUri.startsWith('file:') ? uriToPath(fileOrUri) : fileOrUri;
+    return this.diagnostics.get(pathKey(filePath));
+  }
+
+  /**
+   * Wait for diagnostics for a file to arrive or settle.
+   *
+   * If a notification arrives, resets a quiescence timer (default 100ms) to ensure
+   * multi-stage compiler updates settle before resolving. If no notification arrives
+   * within `timeoutMs`, resolves with whatever is currently cached (or empty array).
+   */
+  waitForDiagnostics(fileOrUri: string, timeoutMs = 2000, quiescenceMs = 100): Promise<Diagnostic[]> {
+    const filePath = fileOrUri.startsWith('file:') ? uriToPath(fileOrUri) : fileOrUri;
+    const targetKey = pathKey(filePath);
+
+    return new Promise<Diagnostic[]>((resolve) => {
+      let quiescenceTimer: NodeJS.Timeout | null = null;
+      let overallTimer: NodeJS.Timeout | null = null;
+
+      const finish = () => {
+        if (quiescenceTimer) clearTimeout(quiescenceTimer);
+        if (overallTimer) clearTimeout(overallTimer);
+        this.diagnosticListeners.delete(onDiag);
+        resolve(this.diagnostics.get(targetKey) ?? []);
+      };
+
+      const onDiag = (key: string) => {
+        if (key === targetKey) {
+          if (quiescenceTimer) clearTimeout(quiescenceTimer);
+          quiescenceTimer = setTimeout(finish, quiescenceMs);
+        }
+      };
+
+      this.diagnosticListeners.add(onDiag);
+
+      overallTimer = setTimeout(finish, timeoutMs);
+    });
   }
 
   async initialize(workspaceFolders?: WorkspaceFolder[]): Promise<void> {
@@ -106,6 +180,7 @@ export class LspClient {
       p.catch(() => undefined);
     }
     this.inflight.clear();
+    this.diagnosticListeners.clear();
     try {
       this.connection.dispose();
     } catch {

@@ -1,0 +1,14 @@
+{
+  "resourceType": "ImplementationGuide",
+  "id": "ig-minimal-with-include",
+  "url": "http://example.org/fhir/ig-minimal-with-include/ImplementationGuide/ig-minimal-with-include",
+  "name": "IgMinimalWithInclude",
+  "status": "draft",
+  "packageId": "example.ig-minimal-with-include",
+  "fhirVersion": ["4.0.1"],
+  "definition": {
+    "parameter": [
+      { "code": "path-binary", "value": "input/cql" }
+    ]
+  }
+}

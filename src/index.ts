@@ -12,6 +12,9 @@ import type { McpContext, Tool } from './tools/defs.js';
 import { executeCqlTool } from './tools/executeCqlTool.js';
 import { getStatusTool } from './tools/statusTool.js';
 import { viewElmTool } from './tools/viewElmTool.js';
+import { signaturesTool } from './tools/signaturesTool.js';
+import { resolveIncludesTool } from './tools/resolveIncludesTool.js';
+import { validateTool } from './tools/validateTool.js';
 import { buildDebugTools } from './tools/debugTools.js';
 import { buildTestPipelineTools } from './tools/testPipelineTools.js';
 import { SERVER_NAME, SERVER_VERSION } from './version.js';
@@ -91,6 +94,9 @@ async function start(): Promise<void> {
     getStatusTool,
     executeCqlTool,
     viewElmTool,
+    signaturesTool,
+    resolveIncludesTool,
+    validateTool,
     ...buildDebugTools(debugSession),
     ...buildTestPipelineTools(),
   ];

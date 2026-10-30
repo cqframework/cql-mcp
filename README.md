@@ -4,7 +4,7 @@ Standalone MCP server for HL7 CQL: execution, ELM inspection, DAP step-through d
 
 ## Status
 
-All 16 tools are implemented: lifecycle and inspection, DAP step-through debugging, and the test pipeline (persisted run history and diff). Run `npm test` for the current unit and integration results.
+All 19 tools are implemented: static inference and semantic analysis, lifecycle and inspection, DAP step-through debugging, and the test pipeline (persisted run history and diff). Run `npm test` for the current unit and integration results.
 
 ## Quick start
 
@@ -51,7 +51,15 @@ Drives `initialize`, `tools/list`, a `cql_test_run_file` invocation, and a `cql_
 
 Java is discovered via `JAVA_HOME` then `PATH`; needs JDK >= 17.
 
-## Tools (16 total)
+## Tools (19 total)
+
+### Static inference and semantic analysis
+
+| Tool | Purpose |
+|---|---|
+| `cql_get_signatures` | Extract all expressions (`define`), functions, parameters, value sets, and code systems with their compiled ELM types |
+| `cql_resolve_includes` | Resolve included libraries on disk (IG/workspace) and surface their exported public defines and function signatures |
+| `cql_validate` | Validate syntax and typing for a file or in-memory content, returning compiler diagnostics without running tests |
 
 ### Lifecycle and inspection
 
@@ -140,11 +148,20 @@ Once the MCP is wired into an agent (opencode, Claude Desktop, or any MCP-aware 
 
 | Scenario | Preferred tools |
 |---|---|
+| Understanding public defines/types in a library without reading whole file | `cql_get_signatures` (single-pass ELM JSON extraction; strips AST bodies) |
+| Inspecting included libraries without token blowup | `cql_resolve_includes` (resolves disk path and extracts public defines/functions) |
+| Fast self-correction before running tests | `cql_validate` with in-memory `content` or file path (captures diagnostics) |
 | New-measure authoring (does my CQL match published expected results?) | `cql_test_run_suite` + per-define diff against `TestCaseResult-*.json` |
 | Regression (why did this patient flip?) | `cql_test_run_file` then `cql_debug_start` + `cql_debug_set_breakpoints` + `cql_debug_continue` + `cql_debug_next` / `cql_debug_step_in` + `cql_debug_get_variables` + `cql_debug_evaluate` |
 | Patient-bundle authoring (why doesn't this bundle trigger the population?) | `cql_test_run_file` then `cql_debug_evaluate` against the CQL retrieve expressions to compare engine output vs. bundle contents |
 | Diff between two CQL versions | `cql_test_list_runs` + `cql_test_diff` with `runA="previous"` and `runB="latest"` |
 | Compile inspection (does the LS interpret my CQL the way I read it?) | `cql_view_elm` with `elmType="ast"` or `elmType="json"` |
+
+### When to use static inference vs. runtime execution
+
+* **Token-Budget Preservation:** Multi-thousand-line helper libraries (`FHIRHelpers`, `MATGlobalCommonFunctionsFHIR4`, `SupplementalDataElements`) will quickly consume 30k+ tokens if read in full. Use `cql_resolve_includes` or `cql_get_signatures` to inspect only the typed public interface (<500 tokens).
+* **Fast Self-Correction Loop:** Calling `cql_test_run_file` on a syntactically invalid CQL file incurs JVM execution overhead and test fixture loading. Call `cql_validate` first (especially with `content: "..."` to test in-memory edits before saving) to resolve syntax and typing diagnostics immediately.
+* **Symbol Discovery over Grepping:** When looking for available functions or definitions across an IG, prefer `cql_get_signatures` and `cql_resolve_includes` over file-grepping to get guaranteed, compiled type signatures (`List<FHIR.Encounter>`, `Interval<DateTime>`) rather than guessing return types from CQL expressions.
 
 Always end a DAP session with `cql_debug_stop`. Always call `cql_get_status` first if the agent hasn't used the MCP in a while — it confirms the JVM and LS are up.
 
