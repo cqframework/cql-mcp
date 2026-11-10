@@ -75,9 +75,7 @@ Drives `initialize`, `tools/list`, a `cql_test_run_file` invocation, and a `cql_
 | `CQL_MCP_LOG_FILE` | (stderr only) | Path to a structured log file (stderr stays clean). |
 | `CQL_MCP_LOG_LEVEL` | `info` | One of `debug`, `info`, `warn`, `error`. |
 
-The previous names `CQL_DEBUG_MCP_JAR_DIR`, `CQL_DEBUG_MCP_WORKSPACE`, `CQL_DEBUG_MCP_LOG_FILE` and `CQL_DEBUG_MCP_LOG_LEVEL` are still accepted and log one deprecation warning per process; the new name wins when both are set. When `CQL_MCP_JAR_DIR` is unset, a valid jar in the legacy cache `~/.cql-debug-mcp/jars` is used in place.
-
-The on-disk run history folder `.cql-debug/test-runs/` keeps its legacy name for compatibility, so existing run history still diffs.
+The run store lives in `<workspace>/.cql-debug/test-runs/`.
 
 Java is discovered via `JAVA_HOME` then `PATH`; needs JDK >= 17.
 

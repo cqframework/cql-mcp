@@ -1,6 +1,5 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { readEnv } from './env.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const DRIVE_LETTER_ABS = /^[A-Za-z]:[\\/]/;
@@ -36,12 +35,7 @@ export function libraryNameOf(cqlFile: string): string {
 }
 
 export function cacheJarDir(): string {
-  return readEnv('CQL_MCP_JAR_DIR', 'CQL_DEBUG_MCP_JAR_DIR') ?? path.join(os.homedir(), '.cql-mcp', 'jars');
-}
-
-/** Cache location used before the rename to cql-mcp; still checked for an existing jar. */
-export function legacyCacheJarDir(): string {
-  return path.join(os.homedir(), '.cql-debug-mcp', 'jars');
+  return process.env.CQL_MCP_JAR_DIR ?? path.join(os.homedir(), '.cql-mcp', 'jars');
 }
 
 export function runStoreDir(rootDir: string): string {

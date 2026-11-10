@@ -1,20 +1,17 @@
 import { expect } from 'chai';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { cacheJarDir, legacyCacheJarDir, libraryNameOf, pathToUri, runStoreDir, uriToPath } from '../../../src/workspace/paths.js';
+import { cacheJarDir, libraryNameOf, pathToUri, runStoreDir, uriToPath } from '../../../src/workspace/paths.js';
 
 describe('workspace/paths', () => {
-  describe('cacheJarDir / legacyCacheJarDir', () => {
-    const saved = { new: process.env.CQL_MCP_JAR_DIR, old: process.env.CQL_DEBUG_MCP_JAR_DIR };
+  describe('cacheJarDir', () => {
+    const saved = process.env.CQL_MCP_JAR_DIR;
     beforeEach(() => {
       delete process.env.CQL_MCP_JAR_DIR;
-      delete process.env.CQL_DEBUG_MCP_JAR_DIR;
     });
     afterEach(() => {
-      for (const [k, v] of [['CQL_MCP_JAR_DIR', saved.new], ['CQL_DEBUG_MCP_JAR_DIR', saved.old]] as const) {
-        if (v === undefined) delete process.env[k];
-        else process.env[k] = v;
-      }
+      if (saved === undefined) delete process.env.CQL_MCP_JAR_DIR;
+      else process.env.CQL_MCP_JAR_DIR = saved;
     });
 
     // Env override values pass through verbatim on every platform:
@@ -27,19 +24,7 @@ describe('workspace/paths', () => {
         process.env.CQL_MCP_JAR_DIR = dir;
         expect(cacheJarDir()).to.equal(dir);
       });
-      it(`honours legacy CQL_DEBUG_MCP_JAR_DIR='${dir}'`, () => {
-        process.env.CQL_DEBUG_MCP_JAR_DIR = dir;
-        expect(cacheJarDir()).to.equal(dir);
-      });
     }
-    it('prefers the new variable over the legacy one', () => {
-      process.env.CQL_MCP_JAR_DIR = '/new';
-      process.env.CQL_DEBUG_MCP_JAR_DIR = '/old';
-      expect(cacheJarDir()).to.equal('/new');
-    });
-    it('legacyCacheJarDir is ~/.cql-debug-mcp/jars', () => {
-      expect(legacyCacheJarDir()).to.equal(path.join(os.homedir(), '.cql-debug-mcp', 'jars'));
-    });
   });
 
   describe('pathToUri / uriToPath', () => {

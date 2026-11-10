@@ -1,7 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { cacheJarDir, legacyCacheJarDir } from '../workspace/paths.js';
-import { peekEnv } from '../workspace/env.js';
+import { cacheJarDir } from '../workspace/paths.js';
 
 export interface MavenCoords {
   groupId: string;
@@ -22,8 +21,6 @@ export interface JarResolution {
 
 export interface JarInstallOptions {
   cacheDir?: string;
-  /** Test seam: location of the pre-rename cache. Defaults to legacyCacheJarDir(). */
-  legacyCacheDir?: string;
   version?: string;
   mavenRepo?: string;
   fetchImpl?: typeof fetch;
@@ -79,13 +76,6 @@ export async function ensureJar(options?: JarInstallOptions): Promise<JarResolut
 
   if (fs.existsSync(jarPath) && isValidJar(jarPath)) {
     return { jarPath, downloaded: false, source: 'cache' };
-  }
-  // Only fall back to the pre-rename cache when the user hasn't chosen a cache location.
-  if (!options?.cacheDir && peekEnv('CQL_MCP_JAR_DIR', 'CQL_DEBUG_MCP_JAR_DIR') === undefined) {
-    const legacyJar = path.join(options?.legacyCacheDir ?? legacyCacheJarDir(), getLocalName(coords));
-    if (fs.existsSync(legacyJar) && isValidJar(legacyJar)) {
-      return { jarPath: legacyJar, downloaded: false, source: 'cache' };
-    }
   }
   if (fs.existsSync(jarPath)) {
     console.warn(

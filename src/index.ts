@@ -18,7 +18,6 @@ import { validateTool } from './tools/validateTool.js';
 import { buildDebugTools } from './tools/debugTools.js';
 import { buildTestPipelineTools } from './tools/testPipelineTools.js';
 import { SERVER_NAME, SERVER_VERSION } from './version.js';
-import { peekEnv, readEnv } from './workspace/env.js';
 import { resolveWorkspaceRoot } from './workspace/workspaceConfig.js';
 
 const SHUTDOWN_WATCHDOG_MS = 15_000;
@@ -37,16 +36,8 @@ function requireTool(tools: Tool[], name: string): Tool {
 }
 
 async function start(): Promise<void> {
-  // Read without warning first so deprecation warnings reach the log file once it is configured.
-  const logLevel = peekEnv('CQL_MCP_LOG_LEVEL', 'CQL_DEBUG_MCP_LOG_LEVEL') as
-    | 'debug'
-    | 'info'
-    | 'warn'
-    | 'error'
-    | undefined;
-  configureLog({ level: logLevel, file: peekEnv('CQL_MCP_LOG_FILE', 'CQL_DEBUG_MCP_LOG_FILE') });
-  readEnv('CQL_MCP_LOG_LEVEL', 'CQL_DEBUG_MCP_LOG_LEVEL');
-  readEnv('CQL_MCP_LOG_FILE', 'CQL_DEBUG_MCP_LOG_FILE');
+  const logLevel = process.env.CQL_MCP_LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error' | undefined;
+  configureLog({ level: logLevel, file: process.env.CQL_MCP_LOG_FILE });
 
   const workspaceRoot = resolveWorkspaceRoot();
 
@@ -86,7 +77,7 @@ async function start(): Promise<void> {
     javaPath: java.javaPath,
     jarPath,
     workspacePath: workspaceRoot,
-    logFile: readEnv('CQL_MCP_LOG_FILE', 'CQL_DEBUG_MCP_LOG_FILE'),
+    logFile: process.env.CQL_MCP_LOG_FILE,
   });
 
   const debugSession = new DapSession({ ls: lsProcess });
