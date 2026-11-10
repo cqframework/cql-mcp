@@ -1,6 +1,6 @@
 ---
 title: "ADR-0001: Runtime Dependency Resolution (Java and the CQL Language Server Jar)"
-status: "Proposed"
+status: "Accepted"
 date: "2026-11-09"
 tags: ["dependencies", "distribution", "jar", "maven", "npm", "restricted-networks"]
 ---
