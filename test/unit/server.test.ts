@@ -12,7 +12,7 @@ import { RuntimeResolver } from '../../src/jvm/runtimeResolver.js';
 import type { DapSession } from '../../src/dap/dapSession.js';
 import { buildAllTools } from '../../src/tools/allTools.js';
 import type { McpContext, Tool } from '../../src/tools/defs.js';
-import { registerTools } from '../../src/tools/register.js';
+import { crashMessage, registerTools } from '../../src/tools/register.js';
 
 // The adapter (src/tools/register.ts) alone maps failures to isError results (ADR-0004 §2.1) and
 // validates arguments against the zod schemas (§2.2). These tests drive a real McpServer through
@@ -128,7 +128,23 @@ describe('server (McpServer + adapter)', () => {
       ]);
       const r = await call(h, 'crash');
       expect(r.isError).to.equal(true);
-      expect(r.text).to.equal(`language_server_crashed: ${JSON.stringify(crash)}`);
+      expect(r.text).to.match(/^The CQL language server crashed \(exit code 1\)\./);
+      expect(r.text).to.include('starts a new one');
+      expect(r.text).to.include(JSON.stringify({ kind: 'language_server_crashed', ...crash }));
+    });
+
+    it('the crash message names the signal and the log file when known', () => {
+      const text = crashMessage(
+        new LanguageServerCrashedError({ exitCode: null, signal: 'SIGKILL', stderrTail: ['oom'] }),
+        '/tmp/cql.log',
+      );
+      expect(text.startsWith('The CQL language server crashed (exit code unknown, signal SIGKILL).')).to.equal(true);
+      expect(text).to.include('at most 3 per session');
+      expect(text).to.include('the LS log at /tmp/cql.log');
+      expect(text).to.include('"stderrTail":["oom"]');
+      expect(crashMessage(new LanguageServerCrashedError({ exitCode: 1, signal: null, stderrTail: [] }))).to.include(
+        'set CQL_MCP_LOG_FILE',
+      );
     });
 
     it('a missing JDK gives an isError result with the "No Java >= 17" text', async () => {

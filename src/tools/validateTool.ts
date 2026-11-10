@@ -6,6 +6,7 @@ import { ensureWorkspaceFolder, syncCqlDocument } from '../lsp/documentSync.js';
 import { z } from 'zod';
 import type { Tool, McpContext } from './defs.js';
 import { pathToUri } from '../workspace/paths.js';
+import { READ_ONLY } from './annotations.js';
 
 export interface FormattedDiagnostic {
   severity: 'error' | 'warning' | 'info' | 'hint';
@@ -36,6 +37,7 @@ export const validateTool: Tool = {
   name: 'cql_validate',
   description:
     'Validates a CQL file or in-memory CQL content for syntax and type errors without executing patient bundles, returning compiler diagnostics and translation errors.',
+  annotations: READ_ONLY,
   inputSchema: {
     cqlFile: z.string().min(1).describe('Path to the .cql file'),
     content: z

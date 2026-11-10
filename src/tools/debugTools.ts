@@ -2,7 +2,9 @@ import type { DapSession, DebugLaunchArgs, StepGranularity } from '../dap/dapSes
 import { GET_VERSION_INFO } from '../lsp/lspCommands.js';
 import { z } from 'zod';
 import { cqlParameterSchema } from './schemas.js';
+import { buildWithin, fitPrefix, jsonLength, maxCharsOf, maxCharsSchema, MAX_LISTED_OMISSIONS } from './outputLimit.js';
 import type { McpContext, Tool } from './defs.js';
+import { STATEFUL } from './annotations.js';
 
 /**
  * Warning for language servers released before the DebugSession socket-close fix
@@ -102,6 +104,54 @@ function extractLaunchArgs(args: Record<string, unknown>): DebugLaunchArgs {
   return out;
 }
 
+interface NamedVariable {
+  name?: string;
+}
+
+/**
+ * Bound a variables result to about `maxChars` (ADR-0004 §2.4): trailing variables are dropped
+ * (across scopes, in order) and listed by name; the scope headers are always kept.
+ */
+export function boundVariables<T extends { variables: NamedVariable[] } | { scopes: Array<{ variables: NamedVariable[] }> }>(
+  result: T,
+  maxChars: number,
+): T | (T & { truncated: true; totalChars: number; maxChars: number; omittedCount: number; omittedVariables: string[] }) {
+  const totalChars = jsonLength(result);
+  if (totalChars <= maxChars) {
+    return result;
+  }
+  const groups: NamedVariable[][] = 'variables' in result ? [result.variables] : result.scopes.map((s) => s.variables);
+  const skeleton = 'variables' in result
+    ? { ...result, variables: [] }
+    : { ...result, scopes: result.scopes.map((s) => ({ ...s, variables: [] })) };
+  const skeletonLength = jsonLength(skeleton);
+  return buildWithin(maxChars, 300, (rawBudget) => {
+    let budget = rawBudget - skeletonLength;
+    const keptGroups: NamedVariable[][] = [];
+    const omitted: NamedVariable[] = [];
+    for (const group of groups) {
+      const { kept, omitted: dropped } = fitPrefix(group, budget);
+      budget -= kept.reduce((n, v) => n + jsonLength(v) + 1, 0);
+      // After the first drop nothing later is kept, so the output is a clean prefix.
+      if (dropped.length > 0) budget = 0;
+      keptGroups.push(kept);
+      omitted.push(...dropped);
+    }
+    const bounded =
+      'variables' in result
+        ? { ...result, variables: keptGroups[0] }
+        : { ...result, scopes: result.scopes.map((s, i) => ({ ...s, variables: keptGroups[i] })) };
+    return {
+      ...(bounded as T),
+      truncated: true as const,
+      totalChars,
+      maxChars,
+      omittedCount: omitted.length,
+      omittedVariables: omitted.slice(0, MAX_LISTED_OMISSIONS).map((v) => v.name ?? '?'),
+    };
+  });
+}
+
 export function buildDebugTools(session: DapSession): Tool[] {
   return [
     {
@@ -119,6 +169,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
         '<root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json (when they exist), as for ' +
         'cql_execute; explicit arguments override. Without rootDir an IG library fails to compile and the ' +
         'session terminates without stopping.',
+      annotations: STATEFUL,
       inputSchema: {
         cqlFile: z.string().min(1).describe('Absolute path to the .cql file'),
         fhirVersion: z.string().optional().describe('FHIR version (default R4)'),
@@ -157,6 +208,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
         '(CqlStepPositionCollector.collectBreakpointableLines). The response may still say verified=true for ' +
         'other lines; the LS marks them unverified later (BreakpointManager.updateBreakpointLineVerification), ' +
         'and a resume that then terminates without stopping lists them in unverifiedBreakpoints.',
+      annotations: STATEFUL,
       inputSchema: {
         cqlFile: z.string().min(1).describe('Absolute path to the .cql file'),
         lines: z.array(z.number().int().positive()).min(1).describe('1-indexed line numbers'),
@@ -178,6 +230,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
         'stopping although breakpoints were set, the result has a note, unverifiedBreakpoints, and errors ' +
         '(Error entries from re-running the library with the launch settings); with no breakpoints set the ' +
         'note is "terminated (no breakpoints set)".',
+      annotations: STATEFUL,
       inputSchema: {
         threadId: z.number().int().default(1),
         timeoutMs: z.number().int().optional().describe('Override the bounded resume wait (default 30000)'),
@@ -191,6 +244,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
     {
       name: 'cql_debug_next',
       description: 'Step over the current statement. Same blocked-until-stop semantics, and same terminated result, as continue.',
+      annotations: STATEFUL,
       inputSchema: {
         threadId: z.number().int().default(1),
         timeoutMs: z.number().int().optional(),
@@ -204,6 +258,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
     {
       name: 'cql_debug_step_in',
       description: 'Step into the current call. Same blocked-until-stop semantics, and same terminated result, as continue.',
+      annotations: STATEFUL,
       inputSchema: {
         threadId: z.number().int().default(1),
         timeoutMs: z.number().int().optional(),
@@ -217,6 +272,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
     {
       name: 'cql_debug_step_out',
       description: 'Step out of the current function. Same blocked-until-stop semantics, and same terminated result, as continue.',
+      annotations: STATEFUL,
       inputSchema: {
         threadId: z.number().int().default(1),
         timeoutMs: z.number().int().optional(),
@@ -232,15 +288,21 @@ export function buildDebugTools(session: DapSession): Tool[] {
       description:
         'Fetch variables. If frameId is given, scopes are enumerated and each scope is expanded ' +
         'into its variable list (flattened one level). If variablesReference is given, only that ' +
-        "subtree is fetched. Exactly one of frameId / variablesReference should be supplied.",
+        "subtree is fetched. Exactly one of frameId / variablesReference should be supplied. " +
+        'Output is bounded by maxChars: when there are more variables than fit, trailing variables are dropped and ' +
+        'listed by name under omittedVariables (with omittedCount), and the result has truncated: true, totalChars ' +
+        '(the full serialized length) and maxChars. Fetch a sub-tree with variablesReference or raise maxChars to see the rest.',
+      annotations: STATEFUL,
       inputSchema: {
         frameId: z.number().int().optional(),
         variablesReference: z.number().int().optional(),
+        maxChars: maxCharsSchema,
       },
       handler: async (_ctx, args) => {
+        const maxChars = maxCharsOf(args);
         if (typeof args.variablesReference === 'number') {
           const variables = await session.getVariables(args.variablesReference);
-          return { variables };
+          return boundVariables({ variables }, maxChars);
         }
         if (typeof args.frameId === 'number') {
           const scopes = await session.scopes(args.frameId);
@@ -249,7 +311,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
             const variables = await session.getVariables(s.variablesReference);
             enrichedScopes.push({ ...s, variables });
           }
-          return { scopes: enrichedScopes };
+          return boundVariables({ scopes: enrichedScopes }, maxChars);
         }
         throw new Error('Provide either frameId or variablesReference');
       },
@@ -259,6 +321,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
       description:
         'Evaluate a CQL expression in the current frame (frameId) or in a watch/hover context ' +
         '(no frameId). Returns the same shape DAP `evaluate` returns: result, type, variablesReference.',
+      annotations: STATEFUL,
       inputSchema: {
         expression: z.string().min(1),
         frameId: z.number().int().optional(),
@@ -273,6 +336,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
       description:
         'Disconnect the active DAP session and close the TCP socket. A no-op if the session has ' +
         'already ended (the debuggee terminated or the language server went away).',
+      annotations: STATEFUL,
       inputSchema: {},
       handler: async () => {
         await session.stop();

@@ -7,11 +7,13 @@ import type { Tool, McpContext } from './defs.js';
 import { pathToUri } from '../workspace/paths.js';
 import { extractSignatures, ExtractedSignatures } from './extractSignatures.js';
 import { resolveIncludePath } from './includeResolver.js';
+import { READ_ONLY } from './annotations.js';
 
 export const resolveIncludesTool: Tool = {
   name: 'cql_resolve_includes',
   description:
     'Resolves included CQL libraries referenced by a CQL file, locating their source files on disk and extracting their public definitions, functions, and terminology bindings.',
+  annotations: READ_ONLY,
   inputSchema: {
     cqlFile: z.string().min(1).describe('Path to the primary .cql file'),
     alias: z

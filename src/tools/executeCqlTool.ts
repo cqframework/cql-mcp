@@ -11,7 +11,9 @@ import { libraryNameOf, pathToUri } from '../workspace/paths.js';
 import { ensureWorkspaceFolder, igRootOf, syncCqlDocument } from '../lsp/documentSync.js';
 import { z } from 'zod';
 import { cqlParametersSchema } from './schemas.js';
+import { buildWithin, fitPrefix, jsonLength, maxCharsOf, maxCharsSchema, MAX_LISTED_OMISSIONS } from './outputLimit.js';
 import type { Tool } from './defs.js';
+import { READ_ONLY } from './annotations.js';
 
 export interface CqlExecuteToolArgs {
   cqlFile: string;
@@ -121,6 +123,63 @@ export interface CqlExecuteResult {
   versions?: ExecuteCqlResponse['versions'];
 }
 
+export interface TruncatedExecuteResult extends CqlExecuteResult {
+  truncated: true;
+  totalChars: number;
+  maxChars: number;
+  omittedCount: number;
+  omittedExpressions: string[];
+  omittedLogLines: number;
+}
+
+/**
+ * Bound the serialized result to about `maxChars` (ADR-0004 §2.4). Over the limit, trailing
+ * expression results are dropped (their names are listed), then log lines that do not fit;
+ * diagnostics, versions and the library skeleton are always kept. If not even the first
+ * expression fits, it is kept with its value cut so the caller still sees something.
+ */
+export function boundExecuteResult(result: CqlExecuteResult, maxChars: number): CqlExecuteResult | TruncatedExecuteResult {
+  const totalChars = jsonLength(result);
+  if (totalChars <= maxChars) {
+    return result;
+  }
+  const skeleton: CqlExecuteResult = {
+    ...result,
+    results: result.results.map((r) => ({ ...r, expressions: [] })),
+    logs: [],
+  };
+  const flat = result.results.flatMap((r, i) => r.expressions.map((expression) => ({ i, expression })));
+  const skeletonLength = jsonLength(skeleton);
+  // The truncation fields (counts and omitted names) are only sized once the omissions are known.
+  return buildWithin(maxChars, 300, (rawBudget) => {
+    const budget = rawBudget - skeletonLength;
+    let { kept, omitted } = fitPrefix(flat, budget);
+    if (kept.length === 0 && flat.length > 0) {
+      const first = flat[0]!;
+      const room = Math.max(0, budget - jsonLength({ ...first.expression, value: '' }) - 20);
+      kept = [{ i: first.i, expression: { ...first.expression, value: `${first.expression.value.slice(0, room)}…[cut]` } }];
+      omitted = flat.slice(1);
+    }
+    const results = result.results.map((r, i) => ({
+      ...r,
+      expressions: kept.filter((k) => k.i === i).map((k) => k.expression),
+    }));
+    const used = jsonLength(results) - jsonLength(skeleton.results);
+    const logs = fitPrefix(result.logs, budget - used);
+    return {
+      ...result,
+      results,
+      logs: logs.kept,
+      truncated: true as const,
+      totalChars,
+      maxChars,
+      omittedCount: omitted.length,
+      omittedExpressions: omitted.slice(0, MAX_LISTED_OMISSIONS).map((o) => o.expression.name),
+      omittedLogLines: logs.omitted.length,
+    };
+  });
+}
+
 function toResult(response: ExecuteCqlResponse): CqlExecuteResult {
   const diagnostics: Array<{ name: string; value: string }> = [];
   for (const result of response.results) {
@@ -159,7 +218,12 @@ export const executeCqlTool: Tool = {
     'For a file in the IG Publisher default layout (<root>/input/cql/*.cql with an ig.ini at <root> or ' +
     'above), rootDir, terminologyUri and optionsPath default to <root> and the default-layout paths ' +
     '<root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json; explicit arguments override. ' +
-    'Other files get no rootDir. Patient data is only read when modelUri is set.',
+    'Other files get no rootDir. Patient data is only read when modelUri is set. ' +
+    'Output is bounded by maxChars: when the result is larger, trailing expression results are dropped and listed by name ' +
+    'under omittedExpressions (with omittedCount), log lines that do not fit are counted in omittedLogLines, and the result ' +
+    'has truncated: true, totalChars (the full serialized length) and maxChars. Diagnostics are always kept. Narrow the ' +
+    'request (fewer contextValues) or raise maxChars to see the rest.',
+  annotations: READ_ONLY,
   inputSchema: {
     cqlFile: z.string().min(1).describe('Path to the .cql file to execute'),
     fhirVersion: z.string().default('R4').describe('FHIR version, e.g. R4 (default R4)'),
@@ -191,6 +255,7 @@ export const executeCqlTool: Tool = {
           'When set, resources in that directory are loaded for retrieval; omit for compile-only runs.',
       ),
     modelName: z.string().default('FHIR').describe('Model identifier sent to the LS (defaults to "FHIR").'),
+    maxChars: maxCharsSchema,
   },
   handler: async (_ctx, args) => {
     const cqlFile = path.resolve(args.cqlFile as string);
@@ -210,6 +275,6 @@ export const executeCqlTool: Tool = {
     // executeCommand on the process wraps crashes into LanguageServerCrashedError
     // and respawns automatically on the next call, unlike a raw client send.
     const raw = await _ctx.process.executeCommand(EXECUTE_CQL, [request]);
-    return toResult(raw as ExecuteCqlResponse);
+    return boundExecuteResult(toResult(raw as ExecuteCqlResponse), maxCharsOf(args));
   },
 };

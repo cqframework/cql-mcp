@@ -43,17 +43,26 @@ export interface ToolContract {
   name: string;
   description: string;
   required: string[];
+  annotations: Record<string, unknown> | null;
   args: Record<string, unknown>;
 }
 
-export function contractOf(tools: Array<{ name: string; description?: string; inputSchema: unknown }>): ToolContract[] {
+export function contractOf(
+  tools: Array<{ name: string; description?: string; inputSchema: unknown; annotations?: Record<string, unknown> }>,
+): ToolContract[] {
   return tools.map((t) => {
     const schema = (t.inputSchema ?? {}) as { properties?: Record<string, unknown>; required?: string[] };
     const args: Record<string, unknown> = {};
     for (const name of Object.keys(schema.properties ?? {}).sort()) {
       args[name] = normalize(schema.properties![name]);
     }
-    return { name: t.name, description: t.description ?? '', required: [...(schema.required ?? [])].sort(), args };
+    return {
+      name: t.name,
+      description: t.description ?? '',
+      required: [...(schema.required ?? [])].sort(),
+      annotations: t.annotations ? Object.fromEntries(Object.entries(t.annotations).sort()) : null,
+      args,
+    };
   });
 }
 

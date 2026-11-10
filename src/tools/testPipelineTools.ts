@@ -11,6 +11,7 @@ import { runFile, runSuite } from '../testPipeline/suiteRunner.js';
 import type { Tool } from './defs.js';
 import { z } from 'zod';
 import { cqlParametersSchema } from './schemas.js';
+import { READ_ONLY, STATEFUL } from './annotations.js';
 
 // Shared by both run tools so callers read the status the way it is computed (suiteRunner.toCaseResult).
 const CASE_STATUS_NOTE =
@@ -37,6 +38,7 @@ export const runFileTool: Tool = {
     IG_DEFAULTS_NOTE +
     ' ' +
     CASE_STATUS_NOTE,
+  annotations: STATEFUL,
   inputSchema: {
     cqlFile: z.string().min(1).describe('Path to the .cql file to execute'),
     fhirVersion: z.string().default('R4').describe('FHIR version, e.g. R4 (default R4)'),
@@ -90,6 +92,7 @@ export const runSuiteTool: Tool = {
     IG_DEFAULTS_NOTE +
     ' ' +
     CASE_STATUS_NOTE,
+  annotations: STATEFUL,
   inputSchema: {
     cqlFile: z.string().min(1).describe('Path to the .cql library file'),
     suiteRoot: z
@@ -151,6 +154,7 @@ export const listRunsTool: Tool = {
   name: 'cql_test_list_runs',
   description:
     'List previously persisted test runs (newest-first). Optionally filter by suite and limit the count.',
+  annotations: READ_ONLY,
   inputSchema: {
     suiteName: z.string().optional().describe('Suite (library) name. Filters to runs of this suite only.'),
     limit: z.number().int().min(1).max(1000).optional().describe('Maximum number of runs to return'),
@@ -183,6 +187,7 @@ export const diffTool: Tool = {
     'Diff two persisted runs for the same suite. Either provide two hash-or-timestamp strings via runA/runB, ' +
     'or pass "latest"/"previous" to use the pointer files for the suite. If no previous run has been recorded, ' +
     'returns a no_previous_run status (not an error).',
+  annotations: READ_ONLY,
   inputSchema: {
     suiteName: z.string().describe('Suite (library) name. Required. Suite whose runs should be diffed.'),
     runA: z

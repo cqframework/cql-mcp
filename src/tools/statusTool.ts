@@ -1,10 +1,12 @@
 import { GET_VERSION_INFO } from '../lsp/lspCommands.js';
 import type { Tool } from './defs.js';
+import { READ_ONLY } from './annotations.js';
 
 export const getStatusTool: Tool = {
   name: 'cql_get_status',
   description:
     'Report JVM/Language Server readiness, jar path and source, java version, workspace root, and the language server version string. The first call starts resolving Java and the language-server jar in the background (a first run may download the jar); until it is ready, `runtime.state` is `resolving` with the current `phase` and download progress.',
+  annotations: READ_ONLY,
   inputSchema: {},
   handler: async (ctx) => {
     // Starting resolution does not block; the status below reports its progress.

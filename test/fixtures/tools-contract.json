@@ -3,14 +3,26 @@
     "name": "cql_get_status",
     "description": "Report JVM/Language Server readiness, jar path and source, java version, workspace root, and the language server version string. The first call starts resolving Java and the language-server jar in the background (a first run may download the jar); until it is ready, `runtime.state` is `resolving` with the current `phase` and download progress.",
     "required": [],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "args": {}
   },
   {
     "name": "cql_execute",
-    "description": "Execute a single CQL library against the language server and return expression results. Compiler/runtime errors are returned as diagnostics with success=false (not a transport error). Provide contextValues to run one library request per patient/context value. For a file in the IG Publisher default layout (<root>/input/cql/*.cql with an ig.ini at <root> or above), rootDir, terminologyUri and optionsPath default to <root> and the default-layout paths <root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json; explicit arguments override. Other files get no rootDir. Patient data is only read when modelUri is set.",
+    "description": "Execute a single CQL library against the language server and return expression results. Compiler/runtime errors are returned as diagnostics with success=false (not a transport error). Provide contextValues to run one library request per patient/context value. For a file in the IG Publisher default layout (<root>/input/cql/*.cql with an ig.ini at <root> or above), rootDir, terminologyUri and optionsPath default to <root> and the default-layout paths <root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json; explicit arguments override. Other files get no rootDir. Patient data is only read when modelUri is set. Output is bounded by maxChars: when the result is larger, trailing expression results are dropped and listed by name under omittedExpressions (with omittedCount), log lines that do not fit are counted in omittedLogLines, and the result has truncated: true, totalChars (the full serialized length) and maxChars. Diagnostics are always kept. Narrow the request (fewer contextValues) or raise maxChars to see the rest.",
     "required": [
       "cqlFile"
     ],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "args": {
       "contextValues": {
         "type": "array",
@@ -31,6 +43,12 @@
       },
       "libraryVersion": {
         "type": "string"
+      },
+      "maxChars": {
+        "type": "integer",
+        "description": "Maximum characters of result to return (default 50000, minimum 1000).",
+        "minimum": 1000,
+        "default": 50000
       },
       "modelName": {
         "type": "string",
@@ -78,10 +96,16 @@
   },
   {
     "name": "cql_view_elm",
-    "description": "Return the ELM representation of a CQL library as the language server serializes it. elmType is 'xml', 'json', or 'ast'.",
+    "description": "Return the ELM representation of a CQL library as the language server serializes it. elmType is 'xml', 'json', or 'ast'. Output is bounded by maxChars, measured on the serialized JSON result (quotes in JSON ELM are escaped, so they count twice): when the result is longer, `content` is cut to a prefix that makes the whole result fit, and the result has truncated: true, totalChars (the full serialized length) and maxChars. Use a larger maxChars to see more.",
     "required": [
       "cqlFile"
     ],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "args": {
       "cqlFile": {
         "type": "string",
@@ -96,6 +120,12 @@
           "ast"
         ],
         "default": "xml"
+      },
+      "maxChars": {
+        "type": "integer",
+        "description": "Maximum characters of result to return (default 50000, minimum 1000).",
+        "minimum": 1000,
+        "default": 50000
       }
     }
   },
@@ -105,6 +135,12 @@
     "required": [
       "cqlFile"
     ],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "args": {
       "cqlFile": {
         "type": "string",
@@ -124,6 +160,12 @@
     "required": [
       "cqlFile"
     ],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "args": {
       "alias": {
         "type": "string",
@@ -147,6 +189,12 @@
     "required": [
       "cqlFile"
     ],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "args": {
       "content": {
         "type": "string",
@@ -175,6 +223,12 @@
     "required": [
       "cqlFile"
     ],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "args": {
       "breakpoints": {
         "type": "array",
@@ -255,6 +309,12 @@
       "cqlFile",
       "lines"
     ],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "args": {
       "cqlFile": {
         "type": "string",
@@ -276,6 +336,12 @@
     "name": "cql_debug_continue",
     "description": "Resume execution; blocks until the debuggee stops, terminates, or the optional timeoutMs elapses. Timeout is NOT an error: the session stays alive and paused. When the debuggee terminates (or the language server goes away) the session ends by itself, so cql_debug_start can be called again without cql_debug_stop. If it terminates without ever stopping although breakpoints were set, the result has a note, unverifiedBreakpoints, and errors (Error entries from re-running the library with the launch settings); with no breakpoints set the note is \"terminated (no breakpoints set)\".",
     "required": [],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "args": {
       "threadId": {
         "type": "integer",
@@ -291,6 +357,12 @@
     "name": "cql_debug_next",
     "description": "Step over the current statement. Same blocked-until-stop semantics, and same terminated result, as continue.",
     "required": [],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "args": {
       "threadId": {
         "type": "integer",
@@ -305,6 +377,12 @@
     "name": "cql_debug_step_in",
     "description": "Step into the current call. Same blocked-until-stop semantics, and same terminated result, as continue.",
     "required": [],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "args": {
       "threadId": {
         "type": "integer",
@@ -319,6 +397,12 @@
     "name": "cql_debug_step_out",
     "description": "Step out of the current function. Same blocked-until-stop semantics, and same terminated result, as continue.",
     "required": [],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "args": {
       "threadId": {
         "type": "integer",
@@ -331,11 +415,23 @@
   },
   {
     "name": "cql_debug_get_variables",
-    "description": "Fetch variables. If frameId is given, scopes are enumerated and each scope is expanded into its variable list (flattened one level). If variablesReference is given, only that subtree is fetched. Exactly one of frameId / variablesReference should be supplied.",
+    "description": "Fetch variables. If frameId is given, scopes are enumerated and each scope is expanded into its variable list (flattened one level). If variablesReference is given, only that subtree is fetched. Exactly one of frameId / variablesReference should be supplied. Output is bounded by maxChars: when there are more variables than fit, trailing variables are dropped and listed by name under omittedVariables (with omittedCount), and the result has truncated: true, totalChars (the full serialized length) and maxChars. Fetch a sub-tree with variablesReference or raise maxChars to see the rest.",
     "required": [],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "args": {
       "frameId": {
         "type": "integer"
+      },
+      "maxChars": {
+        "type": "integer",
+        "description": "Maximum characters of result to return (default 50000, minimum 1000).",
+        "minimum": 1000,
+        "default": 50000
       },
       "variablesReference": {
         "type": "integer"
@@ -348,6 +444,12 @@
     "required": [
       "expression"
     ],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "args": {
       "expression": {
         "type": "string",
@@ -362,6 +464,12 @@
     "name": "cql_debug_stop",
     "description": "Disconnect the active DAP session and close the TCP socket. A no-op if the session has already ended (the debuggee terminated or the language server went away).",
     "required": [],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "args": {}
   },
   {
@@ -370,6 +478,12 @@
     "required": [
       "cqlFile"
     ],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "args": {
       "contextValues": {
         "type": "array",
@@ -443,6 +557,12 @@
       "suiteName",
       "suiteRoot"
     ],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "args": {
       "configPath": {
         "type": "string",
@@ -497,6 +617,12 @@
     "name": "cql_test_list_runs",
     "description": "List previously persisted test runs (newest-first). Optionally filter by suite and limit the count.",
     "required": [],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "args": {
       "limit": {
         "type": "integer",
@@ -522,6 +648,12 @@
       "runB",
       "suiteName"
     ],
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "args": {
       "runA": {
         "type": "string",

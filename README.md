@@ -106,6 +106,12 @@ The language-server jar comes from the first of these that has it:
 
 ## Tools (19 total)
 
+### Errors, annotations and output size
+
+- **Errors.** A tool failure comes back as a normal result with `isError: true` and a message written for the model (what failed and, where known, what to do). That covers invalid arguments (`Input validation error: … at <argument>`), a missing file, CQL or language-server errors, a missing JDK, and an unknown tool name. If the language server crashes, the message starts with a sentence ("The CQL language server crashed (exit code N) …") and ends with the crash details as JSON; the next call that needs the server starts a new one (at most 3 starts per cql-mcp session). JSON-RPC errors are reserved for protocol problems such as a malformed request.
+- **Annotations.** Every tool declares MCP annotations so a client can auto-approve the safe ones. `cql_get_status`, `cql_get_signatures`, `cql_resolve_includes`, `cql_validate`, `cql_view_elm`, `cql_execute`, `cql_test_list_runs` and `cql_test_diff` are read-only and idempotent. The `cql_debug_*` tools (stateful session) and `cql_test_run_file` / `cql_test_run_suite` (write run records under `.cql-debug/test-runs/`) are not read-only. None is destructive or open-world.
+- **Output size.** Results are compact JSON. `cql_view_elm`, `cql_execute` and `cql_debug_get_variables` take an optional `maxChars` (integer, at least 1000, default 50000). `maxChars` bounds the serialized JSON result. A larger result comes back with `truncated: true`, `totalChars` (its full serialized length) and `maxChars`: `cql_view_elm` cuts `content` to the longest prefix that keeps the whole serialized result within `maxChars` (escaped quotes count; `totalChars` is the full serialized length); `cql_execute` drops trailing expression results (listed by name in `omittedExpressions`, with `omittedCount`) and counts dropped log lines in `omittedLogLines`, keeping the diagnostics; `cql_debug_get_variables` drops trailing variables (listed in `omittedVariables`). Narrow the request or raise `maxChars` to see more.
+
 ### Static inference and semantic analysis
 
 | Tool | Purpose |
@@ -119,8 +125,8 @@ The language-server jar comes from the first of these that has it:
 | Tool | Purpose |
 |---|---|
 | `cql_get_status` | JVM/LS readiness, jar path, java version, workspace root, LS version string |
-| `cql_execute` | Execute a CQL library against the LS; per-expression results plus diagnostics |
-| `cql_view_elm` | Return ELM as `xml`, `json`, or `ast` |
+| `cql_execute` | Execute a CQL library against the LS; per-expression results plus diagnostics (bounded by `maxChars`) |
+| `cql_view_elm` | Return ELM as `xml`, `json`, or `ast` (bounded by `maxChars`) |
 
 ### DAP step-through debugging
 
@@ -132,7 +138,7 @@ The language-server jar comes from the first of these that has it:
 | `cql_debug_next` | Step over |
 | `cql_debug_step_in` | Step into |
 | `cql_debug_step_out` | Step out |
-| `cql_debug_get_variables` | Scopes (by `frameId`) or a variable subtree (by `variablesReference`) |
+| `cql_debug_get_variables` | Scopes (by `frameId`) or a variable subtree (by `variablesReference`); bounded by `maxChars` |
 | `cql_debug_evaluate` | Evaluate a CQL expression in the current frame or watch context |
 | `cql_debug_stop` | Disconnect and close TCP socket |
 

@@ -6,11 +6,13 @@ import { z } from 'zod';
 import type { Tool, McpContext } from './defs.js';
 import { pathToUri } from '../workspace/paths.js';
 import { extractSignatures } from './extractSignatures.js';
+import { READ_ONLY } from './annotations.js';
 
 export const signaturesTool: Tool = {
   name: 'cql_get_signatures',
   description:
     'Extracts all expressions (defines), functions, parameters, value sets, and code systems from a CQL file along with their exact compiled return types and parameter types.',
+  annotations: READ_ONLY,
   inputSchema: {
     cqlFile: z.string().min(1).describe('Path to the .cql file'),
     includePrivate: z

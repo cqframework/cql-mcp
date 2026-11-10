@@ -43,7 +43,8 @@ export interface CqlLsProcessOptions {
 
 const DEFAULT_INITIALIZE_TIMEOUT_MS = 30_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 3_000;
-const DEFAULT_RESPAWN_LIMIT = 3;
+/** Language servers cql-mcp starts per session, the first included; after a crash the next call that needs one starts another. */
+export const DEFAULT_RESPAWN_LIMIT = 3;
 const DEFAULT_STDERR_TAIL = 200;
 
 export class CqlLsProcess {
