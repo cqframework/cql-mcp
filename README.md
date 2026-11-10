@@ -49,7 +49,8 @@ npm run test:integration   # requires CQL_LS_JAR_PATH pointing at a real jar
 | `npm run typecheck` | Type-check without emitting |
 | `npm run test:unit` | Run mocha against `dist/test/unit/**` |
 | `npm run test:integration` | Run mocha against `dist/test/integration/**` (requires Java + LS jar) |
-| `npm test` | Both unit + integration |
+| `npm run test:net` | Network tests against local fake repos and proxies (no JDK or real jar needed) |
+| `npm test` | Unit + integration |
 | `npm run smoke` | End-to-end MCP stdio smoke (requires `CQL_LS_JAR_PATH`) |
 
 ## Smoke test
@@ -67,9 +68,12 @@ Drives `initialize`, `tools/list`, a `cql_test_run_file` invocation, and a `cql_
 
 | Var | Default | Purpose |
 |---|---|---|
-| `CQL_LS_JAR_PATH` | (download from Maven Central) | Path to a pre-built `cql-ls-server-*.jar`. Bypasses download. |
+| `CQL_LS_JAR_PATH` | (see [Restricted networks](#restricted-networks)) | Path to a pre-built `cql-ls-server-*.jar`. Bypasses all other sources. |
 | `CQL_LS_VERSION` | `5.0.0` | Maven version to download if no local jar. 5.0.0 is the first release with the LS DebugSession socket-close fix (`bf40a031`, 2026-09-17); `cql_debug_start` warns when the LS is older. |
-| `CQL_LS_MAVEN_REPO` | Maven Central | Maven base URL for jar download. |
+| `CQL_LS_MAVEN_REPO` | (unset) | Maven base URL to download the jar from first. Maven Central is still tried last. Credentials in the URL (`https://user:pw@host/`) are sent as Basic auth to this repo only. |
+| `CQL_LS_MAVEN_USERNAME` / `CQL_LS_MAVEN_PASSWORD` | (unset) | Basic-auth credentials for `CQL_LS_MAVEN_REPO` only. |
+| `CQL_LS_MAVEN_SETTINGS` | `~/.m2/settings.xml` | Maven settings file to read mirrors and server credentials from. |
+| `CQL_LS_DOWNLOAD_TIMEOUT_MS` | `60000` | A download attempt is aborted when no bytes arrive for this long (not a total-time limit). |
 | `CQL_MCP_JAR_DIR` | `~/.cql-mcp/jars` | Where downloaded jars are cached. |
 | `CQL_MCP_WORKSPACE` | `process.cwd()` | Workspace root under which `.cql-debug/test-runs/` is stored. |
 | `CQL_MCP_LOG_FILE` | (stderr only) | Path to a structured log file (stderr stays clean). |
@@ -77,7 +81,27 @@ Drives `initialize`, `tools/list`, a `cql_test_run_file` invocation, and a `cql_
 
 The run store lives in `<workspace>/.cql-debug/test-runs/`.
 
-Java is discovered via `JAVA_HOME` then `PATH`; needs JDK >= 17.
+Java is discovered via `JAVA_HOME` then `PATH`; needs JDK >= 17. Java and the language-server jar are resolved on first use, not at startup, so the server answers `initialize` immediately; call `cql_get_status` to watch a first-run download (`runtime.state`, `runtime.phase`, `runtime.download`).
+
+## Restricted networks
+
+The language-server jar comes from the first of these that has it:
+
+1. `CQL_LS_JAR_PATH`, run in place.
+2. The cql-mcp cache, `~/.cql-mcp/jars/cql-ls-server-<version>.jar` (or `CQL_MCP_JAR_DIR`), run in place.
+3. The vscode-cql extension's jar for the **same version** (`~/.vscode*/extensions/cqframework.cql-*/dist/java-support/jars/`), copied into the cache because VS Code deletes old extension folders on update.
+4. A download from `CQL_LS_MAVEN_REPO`, only when set.
+5. A download from the mirror in your Maven `settings.xml` whose `<mirrorOf>` matches `central` (`central`, `*` or `external:*`, and not excluded by `!central`).
+6. A download from Maven Central, always last.
+
+`cql_get_status` reports which one was used as `jarSource` (`env`, `cache`, `vscode-extension` or `download`). If every source fails, the error lists every path and URL tried with the reason for each, and never includes credentials.
+
+- **`settings.xml`.** Mirrors and `<servers>` credentials are read automatically from `~/.m2/settings.xml` and `$MAVEN_HOME/conf/settings.xml` (or `$M2_HOME`), with user settings overriding global ones by `<id>`. `${env.NAME}` and `${user.home}` placeholders are expanded; a value with an unset placeholder is skipped with a warning. Not supported: `<localRepository>` (the local Maven repository is never searched), `<proxies>` (use the variables below), and encrypted `{…}` passwords (skipped with a warning).
+- **Proxy.** Downloads honour `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` (upper or lower case). Proxy credentials in the URL (`http://user:pw@proxy:3128`) work. Only the download is proxied; the language server JVM is not configured.
+- **Corporate TLS.** Set `NODE_EXTRA_CA_CERTS=/path/to/ca.pem` for a TLS-intercepting proxy or a private CA. Node reads it at startup, so set it in the MCP client's `env`.
+- **Integrity.** The download is checked against its `.sha1` (a missing `.sha1` is accepted with a warning; any other `.sha1` failure fails that source) and against `Content-Length`.
+- **Manual fallback.** Download `cql-ls-server-<version>.jar` yourself and copy it into `~/.cql-mcp/jars/`, or point `CQL_LS_JAR_PATH` at it.
+- **Windows.** A running cql-mcp holds its jar open. Rebuilding or reinstalling a jar that a running instance uses directly (`CQL_LS_JAR_PATH`) fails until that instance exits.
 
 ## Tools (19 total)
 

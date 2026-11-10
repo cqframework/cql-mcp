@@ -34,8 +34,20 @@ export function libraryNameOf(cqlFile: string): string {
   return base.endsWith('.cql') ? base.slice(0, -'.cql'.length) : base;
 }
 
-export function cacheJarDir(): string {
-  return process.env.CQL_MCP_JAR_DIR ?? path.join(os.homedir(), '.cql-mcp', 'jars');
+/**
+ * path.join that follows the base's own convention: a Windows-form base (drive letter, UNC or
+ * backslashes) is joined with win32 rules even when running on macOS/Linux, which keeps path logic
+ * testable for all three platform forms.
+ */
+export function joinLike(base: string, ...segments: string[]): string {
+  if (process.platform !== 'win32' && isWindowsForm(base)) {
+    return path.win32.join(base, ...segments);
+  }
+  return path.join(base, ...segments);
+}
+
+export function cacheJarDir(env: NodeJS.ProcessEnv = process.env, homeDir: string = os.homedir()): string {
+  return env.CQL_MCP_JAR_DIR ?? joinLike(homeDir, '.cql-mcp', 'jars');
 }
 
 export function runStoreDir(rootDir: string): string {

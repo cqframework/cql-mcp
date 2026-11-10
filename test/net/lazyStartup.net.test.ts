@@ -75,7 +75,7 @@ describe('net: lazy startup (ADR-0001 §2.2)', function () {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('answers initialize in under 1 s with an empty cache, then reports the stalled download and exits cleanly', async function () {
+  it('answers initialize without waiting on the jar, then reports the stalled download and exits cleanly', async function () {
     const javaHome = writeFakeJavaHome(path.join(tmp, 'fakejdk'));
     if (!javaHome && !process.env.JAVA_HOME) {
       this.skip(); // Windows without a JDK: nothing to stand in for java.exe
@@ -102,9 +102,14 @@ describe('net: lazy startup (ADR-0001 §2.2)', function () {
         clientInfo: { name: 'net-test', version: '0' },
       });
       const latencyMs = Date.now() - spawnedAt;
+      // Informational only: it includes Node's (possibly cold) startup, so it is not asserted on.
       console.log(`net: initialize answered ${latencyMs} ms after spawn (process start included)`);
       expect(init.result.serverInfo.name).to.equal('cql-mcp');
-      expect(latencyMs, 'initialize latency').to.be.lessThan(1000);
+      // The real property: initialize does not depend on resolving the jar. Nothing has touched
+      // the repo yet (resolution is lazy), and the jar request made later stays stalled without
+      // blocking the server. 5 s is only a safety ceiling for a pathological machine.
+      expect(repo.jarRequests, 'no jar request before first use').to.have.length(0);
+      expect(latencyMs, 'safety ceiling').to.be.lessThan(5000);
       client.notify('notifications/initialized');
 
       const tools = await client.request('tools/list', {});
@@ -124,6 +129,7 @@ describe('net: lazy startup (ADR-0001 §2.2)', function () {
       expect(status.runtime.download.url).to.include(repo.url).and.to.include('cql-ls-server-9.9.9.jar');
       expect(status.runtime.download.bytes).to.be.greaterThan(0);
       expect(status.ready).to.equal(false);
+      // The jar request was recorded and is still stalled (the server kept answering meanwhile).
       expect(repo.jarRequests.length).to.be.greaterThan(0);
     } finally {
       child.stdin.end(); // MCP clients disconnect by closing stdin

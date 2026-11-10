@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { cacheJarDir, libraryNameOf, pathToUri, runStoreDir, uriToPath } from '../../../src/workspace/paths.js';
+import { cacheJarDir, joinLike, libraryNameOf, pathToUri, runStoreDir, uriToPath } from '../../../src/workspace/paths.js';
 
 describe('workspace/paths', () => {
   describe('cacheJarDir', () => {
@@ -18,6 +18,20 @@ describe('workspace/paths', () => {
     //   macOS/Linux '/opt/jars'   Windows 'C:\\jars'   Windows 'C:/jars'
     it('defaults to ~/.cql-mcp/jars', () => {
       expect(cacheJarDir()).to.equal(path.join(os.homedir(), '.cql-mcp', 'jars'));
+    });
+    // Home directory per platform form (the env and home are injectable):
+    //   /home/u -> /home/u/.cql-mcp/jars   C:\Users\u -> C:\Users\u\.cql-mcp\jars   C:/Users/u -> C:\Users\u\.cql-mcp\jars
+    it('builds the default under a given home for each platform form', () => {
+      expect(cacheJarDir({}, '/home/u')).to.equal(path.join('/home/u', '.cql-mcp', 'jars'));
+      expect(cacheJarDir({}, 'C:\\Users\\u')).to.equal('C:\\Users\\u\\.cql-mcp\\jars');
+      expect(cacheJarDir({}, 'C:/Users/u').replace(/\\/g, '/')).to.equal('C:/Users/u/.cql-mcp/jars');
+    });
+    it('reads the override from the injected env', () => {
+      expect(cacheJarDir({ CQL_MCP_JAR_DIR: 'C:/cache' }, '/home/u')).to.equal('C:/cache');
+    });
+    it('joinLike follows the base convention', () => {
+      expect(joinLike('/a/b', 'c')).to.equal(path.join('/a/b', 'c'));
+      expect(joinLike('C:\\a', 'c', 'd')).to.equal('C:\\a\\c\\d');
     });
     for (const dir of ['/opt/jars', 'C:\\jars', 'C:/jars']) {
       it(`honours CQL_MCP_JAR_DIR='${dir}'`, () => {
