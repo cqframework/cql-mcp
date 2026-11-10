@@ -1,6 +1,6 @@
 ---
 title: "ADR-0003: Host-Native Path Handling"
-status: "Proposed"
+status: "Accepted"
 date: "2026-11-10"
 tags: ["paths", "uris", "windows", "cross-platform", "testing"]
 ---

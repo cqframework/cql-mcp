@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import * as path from 'node:path';
 import { resolveIncludePath } from '../../../src/tools/includeResolver.js';
+import { onPosix, onWindows } from '../../helpers/platform.js';
 
 describe('tools/includeResolver', () => {
   // The fake file system's keys and the expected values are built with the host's path.join, so
@@ -38,18 +39,33 @@ describe('tools/includeResolver', () => {
     expect(resolved).to.equal(j('/projects/my-ig/input/cql', 'FHIRHelpers.cql'));
   });
 
-  // A Windows-form primary file is only understood by path.dirname on a Windows host (on POSIX
-  // path.dirname doesn't split on backslashes), so this case runs there; the POSIX-form tests above
-  // are its counterpart everywhere else.
-  (process.platform === 'win32' ? it : it.skip)('resolves Tier 2 for a Windows-form primary file (Windows host)', () => {
-    const primary = 'C:\\projects\\my-ig\\input\\cql\\sub\\NestedMeasure.cql';
-    const expected = path.win32.join('C:\\projects\\my-ig', 'input', 'cql', 'FHIRHelpers.cql');
-    const resolved = resolveIncludePath({
-      primaryFile: primary,
-      libraryName: 'FHIRHelpers',
-      exists: (p) => p === expected,
+  // Each host tests its own native primary-file form (ADR-0003).
+  onPosix('native forms', () => {
+    it('resolves Tier 2 for a POSIX primary file', () => {
+      const expected = '/projects/my-ig/input/cql/FHIRHelpers.cql';
+      const resolved = resolveIncludePath({
+        primaryFile: '/projects/my-ig/input/cql/sub/NestedMeasure.cql',
+        libraryName: 'FHIRHelpers',
+        exists: (p) => p === expected,
+      });
+      expect(resolved).to.equal(expected);
     });
-    expect(resolved).to.equal(expected);
+  });
+  onWindows('native forms', () => {
+    for (const primary of [
+      'C:\\projects\\my-ig\\input\\cql\\sub\\NestedMeasure.cql',
+      'C:/projects/my-ig/input/cql/sub/NestedMeasure.cql',
+    ]) {
+      it(`resolves Tier 2 for ${primary}`, () => {
+        const expected = 'C:\\projects\\my-ig\\input\\cql\\FHIRHelpers.cql';
+        const resolved = resolveIncludePath({
+          primaryFile: primary,
+          libraryName: 'FHIRHelpers',
+          exists: (p) => p === expected,
+        });
+        expect(resolved).to.equal(expected);
+      });
+    }
   });
 
   it('resolves Tier 3: workspace folders when not in local IG directory', () => {

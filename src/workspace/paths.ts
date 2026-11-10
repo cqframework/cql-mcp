@@ -2,58 +2,26 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const DRIVE_LETTER_ABS = /^[A-Za-z]:[\\/]/;
-const UNC_ABS = /^\\\\/;
-
-function isWindowsForm(p: string): boolean {
-  return DRIVE_LETTER_ABS.test(p) || UNC_ABS.test(p) || p.includes('\\');
-}
-
+/** File URI for a host path (relative paths resolve against the cwd). See ADR-0003. */
 export function pathToUri(p: string): string {
-  if (process.platform !== 'win32' && isWindowsForm(p)) {
-    const normalized = p.replace(/\\/g, '/');
-    const absolute = normalized.startsWith('/') ? normalized : `/${normalized}`;
-    return pathToFileURL(absolute).toString();
-  }
   return pathToFileURL(path.resolve(p)).toString();
 }
 
+/** Host path for a file URI; on Windows both `file:///C:/x` and `file:///c%3A/x` are accepted. */
 export function uriToPath(uri: string): string {
-  if (process.platform === 'win32') {
-    return fileURLToPath(uri);
-  }
-  const pathname = decodeURIComponent(new URL(uri).pathname);
-  if (/^\/[A-Za-z]:\//.test(pathname)) {
-    return pathname.slice(1).replace(/\//g, '\\');
-  }
   return fileURLToPath(uri);
 }
 
 export function libraryNameOf(cqlFile: string): string {
-  const base = cqlFile.split(/[\\/]/).filter(Boolean).pop() ?? cqlFile;
+  const base = path.basename(cqlFile) || cqlFile;
   return base.endsWith('.cql') ? base.slice(0, -'.cql'.length) : base;
 }
 
-/**
- * path.join that follows the base's own convention: a Windows-form base (drive letter, UNC or
- * backslashes) is joined with win32 rules even when running on macOS/Linux, which keeps path logic
- * testable for all three platform forms.
- */
-export function joinLike(base: string, ...segments: string[]): string {
-  if (process.platform !== 'win32' && isWindowsForm(base)) {
-    return path.win32.join(base, ...segments);
-  }
-  return path.join(base, ...segments);
-}
-
 export function cacheJarDir(env: NodeJS.ProcessEnv = process.env, homeDir: string = os.homedir()): string {
-  return env.CQL_MCP_JAR_DIR ?? joinLike(homeDir, '.cql-mcp', 'jars');
+  return env.CQL_MCP_JAR_DIR ?? path.join(homeDir, '.cql-mcp', 'jars');
 }
 
 export function runStoreDir(rootDir: string): string {
-  if (process.platform !== 'win32' && isWindowsForm(rootDir)) {
-    return path.win32.join(rootDir, '.cql-debug', 'test-runs');
-  }
   return path.join(rootDir, '.cql-debug', 'test-runs');
 }
 

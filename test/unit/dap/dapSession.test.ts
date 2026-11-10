@@ -10,7 +10,6 @@ import { ContentLengthReader, writeFramed } from '../../../src/dap/framing.js';
 import type { CqlLsProcess } from '../../../src/jvm/cqlLsProcess.js';
 import type { LspClient } from '../../../src/lsp/lspClient.js';
 import { pathToUri } from '../../../src/workspace/paths.js';
-import { hostFileUri } from '../../helpers/hostPaths.js';
 
 class FakeLsProcess {
   /** executeCql calls made by the session (the error-collecting re-run). */
@@ -217,8 +216,9 @@ describe('dap/dapSession', () => {
     const launch = setup.sent.find((m) => (m as { command?: string }).command === 'launch') as {
       arguments: { libraryUri: string; libraryName: string; fhirVersion: string };
     };
-    // POSIX-form input: on a Windows host '/x' resolves against the current drive.
-    expect(launch.arguments.libraryUri).to.equal(hostFileUri('/x/lib.cql'));
+    // The session sends the URI of the file it was given (pathToUri's own forms are tested in
+    // workspace/paths.test.ts).
+    expect(launch.arguments.libraryUri).to.equal(pathToUri('/x/lib.cql'));
     expect(launch.arguments.libraryName).to.equal('lib');
     expect(launch.arguments.fhirVersion).to.equal('R4');
 

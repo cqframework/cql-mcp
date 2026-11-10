@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { onPosix, onWindows } from '../../helpers/platform.js';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -227,34 +228,51 @@ describe('jvm/mavenSettings', () => {
     });
   });
 
-  describe('settings file locations (macOS/Linux, Windows backslash, Windows forward slash)', () => {
-    //   input                                   user settings                           global settings
-    //   home /home/u                            /home/u/.m2/settings.xml                -
-    //   home C:\Users\u                         C:\Users\u\.m2\settings.xml             -
-    //   CQL_LS_MAVEN_SETTINGS=C:/tools/s.xml    used as-is                              -
-    //   MAVEN_HOME=/opt/mvn  (and /opt/mvn/)    -                                       /opt/mvn/conf/settings.xml
-    //   MAVEN_HOME=C:\mvn    (and C:\mvn\)      -                                       C:\mvn\conf\settings.xml
-    it('/home/u', () => {
-      expect(mavenSettingsPaths({ homeDir: '/home/u', env: {} }).user).to.equal(path.join('/home/u', '.m2', 'settings.xml'));
-    });
-    it('C:\\Users\\u', () => {
-      expect(mavenSettingsPaths({ homeDir: 'C:\\Users\\u', env: {} }).user).to.equal(path.win32.join('C:\\Users\\u', '.m2', 'settings.xml'));
-      expect(mavenSettingsPaths({ homeDir: 'C:\\Users\\u', env: {} }).user).to.equal('C:\\Users\\u\\.m2\\settings.xml');
-    });
-    it('C:/Users/u (forward slashes)', () => {
-      const p = mavenSettingsPaths({ homeDir: 'C:/Users/u', env: {} }).user;
-      expect(p.replace(/\\/g, '/')).to.equal('C:/Users/u/.m2/settings.xml');
+  describe('settings file locations', () => {
+    // Each host tests its own native forms (ADR-0003):
+    //   host            input                                user settings
+    //   macOS / Linux   home /home/u                         /home/u/.m2/settings.xml
+    //   Windows         home C:\Users\u or C:/Users/u        C:\Users\u\.m2\settings.xml
+    //   any             CQL_LS_MAVEN_SETTINGS=<file>         used as-is
+    //   macOS / Linux   MAVEN_HOME=/opt/mvn (and /opt/mvn/)  /opt/mvn/conf/settings.xml
+    //   Windows         MAVEN_HOME=C:\mvn (and C:\mvn\)      C:\mvn\conf\settings.xml
+    it('joins under a home built with path.join', () => {
+      const home = path.join(os.tmpdir(), 'home-u');
+      expect(mavenSettingsPaths({ homeDir: home, env: {} }).user).to.equal(path.join(home, '.m2', 'settings.xml'));
     });
     it('CQL_LS_MAVEN_SETTINGS is used as-is', () => {
-      expect(mavenSettingsPaths({ homeDir: '/h', env: { CQL_LS_MAVEN_SETTINGS: 'C:/tools/settings.xml' } }).user).to.equal(
-        'C:/tools/settings.xml',
+      const file = path.join(os.tmpdir(), 'tools', 'settings.xml');
+      expect(mavenSettingsPaths({ homeDir: '/h', env: { CQL_LS_MAVEN_SETTINGS: file } }).user).to.equal(file);
+    });
+    it('MAVEN_HOME builds the global settings path', () => {
+      const mvn = path.join(os.tmpdir(), 'mvn');
+      expect(mavenSettingsPaths({ homeDir: '/h', env: { MAVEN_HOME: mvn } }).global).to.equal(
+        path.join(mvn, 'conf', 'settings.xml'),
+      );
+      expect(mavenSettingsPaths({ homeDir: '/h', env: { M2_HOME: mvn } }).global).to.equal(
+        path.join(mvn, 'conf', 'settings.xml'),
       );
     });
-    it('MAVEN_HOME with and without a trailing separator', () => {
-      expect(mavenSettingsPaths({ homeDir: '/h', env: { MAVEN_HOME: '/opt/mvn' } }).global).to.equal(path.join('/opt/mvn', 'conf', 'settings.xml'));
-      expect(mavenSettingsPaths({ homeDir: '/h', env: { MAVEN_HOME: '/opt/mvn/' } }).global).to.equal(path.join('/opt/mvn', 'conf', 'settings.xml'));
-      expect(mavenSettingsPaths({ homeDir: '/h', env: { MAVEN_HOME: 'C:\\mvn' } }).global).to.equal('C:\\mvn\\conf\\settings.xml');
-      expect(mavenSettingsPaths({ homeDir: '/h', env: { MAVEN_HOME: 'C:\\mvn\\' } }).global).to.equal('C:\\mvn\\conf\\settings.xml');
+    onPosix('native forms', () => {
+      it('/home/u', () => {
+        expect(mavenSettingsPaths({ homeDir: '/home/u', env: {} }).user).to.equal('/home/u/.m2/settings.xml');
+      });
+      it('MAVEN_HOME with and without a trailing separator', () => {
+        expect(mavenSettingsPaths({ homeDir: '/h', env: { MAVEN_HOME: '/opt/mvn' } }).global).to.equal('/opt/mvn/conf/settings.xml');
+        expect(mavenSettingsPaths({ homeDir: '/h', env: { MAVEN_HOME: '/opt/mvn/' } }).global).to.equal('/opt/mvn/conf/settings.xml');
+      });
+    });
+    onWindows('native forms', () => {
+      it('C:\\Users\\u', () => {
+        expect(mavenSettingsPaths({ homeDir: 'C:\\Users\\u', env: {} }).user).to.equal('C:\\Users\\u\\.m2\\settings.xml');
+      });
+      it('C:/Users/u (forward slashes)', () => {
+        expect(mavenSettingsPaths({ homeDir: 'C:/Users/u', env: {} }).user).to.equal('C:\\Users\\u\\.m2\\settings.xml');
+      });
+      it('MAVEN_HOME with and without a trailing separator', () => {
+        expect(mavenSettingsPaths({ homeDir: 'C:\\h', env: { MAVEN_HOME: 'C:\\mvn' } }).global).to.equal('C:\\mvn\\conf\\settings.xml');
+        expect(mavenSettingsPaths({ homeDir: 'C:\\h', env: { MAVEN_HOME: 'C:\\mvn\\' } }).global).to.equal('C:\\mvn\\conf\\settings.xml');
+      });
     });
   });
 });

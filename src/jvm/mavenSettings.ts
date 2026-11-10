@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { log } from '../log.js';
-import { joinLike } from '../workspace/paths.js';
 
 export interface MavenMirror {
   id: string;
@@ -38,9 +38,9 @@ const parser = new XMLParser({
 export function mavenSettingsPaths(options: LoadMavenSettingsOptions = {}): { user: string; global?: string } {
   const env = options.env ?? process.env;
   const homeDir = options.homeDir ?? os.homedir();
-  const user = env.CQL_LS_MAVEN_SETTINGS || joinLike(homeDir, '.m2', 'settings.xml');
+  const user = env.CQL_LS_MAVEN_SETTINGS || path.join(homeDir, '.m2', 'settings.xml');
   const mavenHome = env.MAVEN_HOME || env.M2_HOME;
-  return { user, global: mavenHome ? joinLike(mavenHome, 'conf', 'settings.xml') : undefined };
+  return { user, global: mavenHome ? path.join(mavenHome, 'conf', 'settings.xml') : undefined };
 }
 
 /**

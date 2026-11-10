@@ -25,7 +25,8 @@ export function collectJavaCandidates(javaHome?: string): string[] {
 }
 
 export function resolveJavaBinary(bin: string, pathEnv?: string): string | null {
-  const isPathForm = bin.includes('/') || bin.includes('\\');
+  // Host-native (ADR-0003): path.basename understands both separators on Windows, only '/' on POSIX.
+  const isPathForm = path.basename(bin) !== bin;
   if (isPathForm) {
     return fs.existsSync(bin) ? path.resolve(bin) : null;
   }

@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import { log } from '../log.js';
 import { ensureJar, JarInstallError } from './jarInstaller.js';
 import type { JarInstallOptions, JarResolution } from './jarInstaller.js';
@@ -51,7 +52,7 @@ function stripUserinfo(url: string): string {
 }
 
 function lsVersionOf(jarPath: string): string | null {
-  const m = /cql-ls-server-(.+)\.jar$/.exec(jarPath.split(/[\\/]/).pop() ?? '');
+  const m = /cql-ls-server-(.+)\.jar$/.exec(path.basename(jarPath));
   return m ? m[1] : null;
 }
 

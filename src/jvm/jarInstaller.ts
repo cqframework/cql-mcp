@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { EnvHttpProxyAgent, fetch as undiciFetch } from 'undici';
 import { log } from '../log.js';
-import { cacheJarDir, joinLike } from '../workspace/paths.js';
+import { cacheJarDir } from '../workspace/paths.js';
 import { findCentralMirror, findServer, loadMavenSettings } from './mavenSettings.js';
 
 export interface MavenCoords {
@@ -118,7 +118,7 @@ export async function ensureJar(options?: JarInstallOptions): Promise<JarResolut
   const coords = getCqlLsCoords(version);
   const localName = getLocalName(coords);
   const cacheDir = options?.cacheDir ?? cacheJarDir(env, homeDir);
-  const jarPath = joinLike(cacheDir, localName);
+  const jarPath = path.join(cacheDir, localName);
   const attempts: JarAttempt[] = [];
 
   sweepStaleParts(cacheDir);
@@ -582,7 +582,7 @@ function buildFailureMessage(localName: string, version: string, attempts: JarAt
 function findExtensionJars(homeDir: string, localName: string): string[] {
   const found: string[] = [];
   for (const root of EXTENSION_ROOTS) {
-    const extensionsDir = joinLike(homeDir, root, 'extensions');
+    const extensionsDir = path.join(homeDir, root, 'extensions');
     let entries: string[];
     try {
       entries = fs.readdirSync(extensionsDir);
@@ -591,7 +591,7 @@ function findExtensionJars(homeDir: string, localName: string): string[] {
     }
     const folders = entries.filter((e) => e.startsWith('cqframework.cql-')).sort().reverse();
     for (const folder of folders) {
-      const jar = joinLike(extensionsDir, folder, 'dist', 'java-support', 'jars', localName);
+      const jar = path.join(extensionsDir, folder, 'dist', 'java-support', 'jars', localName);
       if (fs.existsSync(jar)) {
         found.push(jar);
       }

@@ -17,13 +17,13 @@ import { pathToUri } from '../workspace/paths.js';
  *
  * State is held per client, so a respawned language server (a new client) starts fresh.
  *
- * Path forms handled (each has unit tests):
+ * Paths follow the host's own rules (ADR-0003); each CI runner tests its native forms:
  *
- * | Form                     | Example                         | Project root of a file in input/cql |
- * | ------------------------ | ------------------------------- | ----------------------------------- |
- * | macOS / Linux            | /a/proj/input/cql/X.cql         | /a/proj                             |
- * | Windows backslash        | C:\a\proj\input\cql\X.cql       | C:\a\proj                           |
- * | Windows forward slash    | C:/a/proj/input/cql/X.cql       | C:/a/proj                           |
+ * | Host           | Example input                  | Project root of a file in input/cql |
+ * | -------------- | ------------------------------ | ----------------------------------- |
+ * | macOS / Linux  | /a/proj/input/cql/X.cql        | /a/proj                             |
+ * | Windows        | C:\a\proj\input\cql\X.cql      | C:\a\proj                           |
+ * | Windows        | C:/a/proj/input/cql/X.cql      | C:\a\proj (normalized)              |
  */
 
 export interface NotificationSink {
@@ -52,31 +52,24 @@ function stateFor(client: NotificationSink): SyncState {
   return s;
 }
 
-const WINDOWS_FORM = /^[A-Za-z]:[\\/]|^\\\\|\\/;
-
 /**
- * A comparison key for a path: forward slashes, no trailing slash, drive letter lower-cased.
- *
- * On a Windows host every input is resolved with win32 rules (so a relative or POSIX-form path
- * lands on the current drive); elsewhere a Windows-form input is kept as given and anything else
- * is resolved with POSIX rules. Backslashes are converted afterwards in every case, so the key of
- * a path and the key of the same path coming back from a `file://` URI always agree.
- * `platform` and `cwd` are injectable so both host kinds can be tested from any host.
+ * A comparison key for a path: the host's own resolution rules, then forward slashes, no trailing
+ * slash and a lower-case drive letter on Windows, so `C:\\a\\X.cql`, `C:/a/X.cql`, a relative path
+ * and `file:///c%3A/a/X.cql` (via uriToPath) all give the same key. The rules come from `platform`
+ * only, never from the string (ADR-0003); `platform` and `cwd` are injectable so both branches can
+ * be tested from any host.
  */
 export function pathKey(p: string, platform: NodeJS.Platform = process.platform, cwd: string = process.cwd()): string {
-  let k: string;
+  const impl = platform === 'win32' ? path.win32 : path.posix;
+  let k = impl.resolve(cwd, p);
   if (platform === 'win32') {
-    k = path.win32.resolve(cwd, p);
-  } else if (WINDOWS_FORM.test(p)) {
-    k = p;
-  } else {
-    k = path.posix.resolve(cwd, p);
+    k = k.replace(/\\/g, '/');
+    if (/^[A-Za-z]:/.test(k)) {
+      k = k[0]!.toLowerCase() + k.slice(1);
+    }
   }
-  k = k.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (/^[A-Za-z]:/.test(k)) {
-    k = k[0]!.toLowerCase() + k.slice(1);
-  }
-  return k;
+  // resolve() already removed trailing separators except on a root ('/', 'c:/', '//srv/share/').
+  return k.length > 1 && !k.endsWith(':/') ? k.replace(/\/+$/, '') : k;
 }
 
 /** True when `file` is `folder` or lies inside it. */
@@ -87,19 +80,31 @@ export function isUnder(file: string, folder: string): boolean {
 }
 
 /**
+ * The root of the innermost `…/input/cql/…` layout containing `cqlFile` (the directory above
+ * `input`), or null when the file isn't in one. Walks parents with `path.dirname`, so roots and
+ * separators follow the host.
+ */
+function inputCqlRoot(cqlFile: string): string | null {
+  let dir = path.dirname(path.normalize(cqlFile));
+  for (;;) {
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      return null;
+    }
+    if (path.basename(dir) === 'cql' && path.basename(parent) === 'input') {
+      return path.dirname(parent);
+    }
+    dir = parent;
+  }
+}
+
+/**
  * The folder to register for a CQL file: the directory above `input/cql` when the file sits in an
  * IG-style `…/input/cql/…` layout (so sibling `input/` content such as modelinfo resolves), else
- * the file's own directory. The result keeps the input's separator style.
+ * the file's own directory. Separators follow the host (`path.normalize`).
  */
 export function projectRootOf(cqlFile: string): string {
-  const sep = separatorOf(cqlFile);
-  const parts = cqlFile.split(/[\\/]/);
-  const i = inputCqlIndex(parts);
-  if (i >= 0) {
-    return parts.slice(0, i - 1).join(sep) || sep;
-  }
-  const dir = parts.slice(0, -1).join(sep);
-  return dir || sep;
+  return inputCqlRoot(cqlFile) ?? path.dirname(path.normalize(cqlFile));
 }
 
 /**
@@ -110,35 +115,23 @@ export function projectRootOf(cqlFile: string): string {
  * parsed. `ig.ini` is the publisher's root marker, and this mirrors the server's own lookup
  * (IgContextManager.findIgContext), which looks for it at the project root and then in each
  * ancestor. Without `rootDir` the server loads no IG packages, so modelinfo such as USQualityCore
- * and IG namespaces fail to resolve. The result keeps the input's separator style.
+ * and IG namespaces fail to resolve. Separators follow the host.
  */
 export function igRootOf(cqlFile: string, exists: (p: string) => boolean = fs.existsSync): string | null {
-  const sep = separatorOf(cqlFile);
-  const parts = cqlFile.split(/[\\/]/);
-  const i = inputCqlIndex(parts);
-  if (i < 0) {
+  const root = inputCqlRoot(cqlFile);
+  if (root === null) {
     return null;
   }
-  for (let k = i - 1; k >= 1; k--) {
-    if (exists(`${parts.slice(0, k).join(sep)}${sep}ig.ini`)) {
-      return projectRootOf(cqlFile);
+  for (let dir = root; ; ) {
+    if (exists(path.join(dir, 'ig.ini'))) {
+      return root;
     }
-  }
-  return null;
-}
-
-function separatorOf(p: string): string {
-  return WINDOWS_FORM.test(p) && p.includes('\\') ? '\\' : '/';
-}
-
-/** Index of `cql` in the innermost `input/cql` pair of a split path, or -1 when there is none. */
-function inputCqlIndex(parts: string[]): number {
-  for (let i = parts.length - 2; i >= 1; i--) {
-    if (parts[i] === 'cql' && parts[i - 1] === 'input') {
-      return i;
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      return null;
     }
+    dir = parent;
   }
-  return -1;
 }
 
 /** Record a folder the server already knows about (for example, the one passed to `initialize`). */
@@ -160,7 +153,7 @@ export function ensureWorkspaceFolder(client: NotificationSink, cqlFile: string)
   const root = projectRootOf(cqlFile);
   client.sendNotification('workspace/didChangeWorkspaceFolders', {
     event: {
-      added: [{ uri: pathToUri(root), name: path.basename(root.replace(/[\\/]+$/, '')) || 'probe' }],
+      added: [{ uri: pathToUri(root), name: path.basename(root) || 'probe' }],
       removed: [],
     },
   });

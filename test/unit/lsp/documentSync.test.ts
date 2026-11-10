@@ -13,6 +13,7 @@ import {
   type NotificationSink,
 } from '../../../src/lsp/documentSync.js';
 import { pathToUri, uriToPath } from '../../../src/workspace/paths.js';
+import { onPosix, onWindows } from '../../helpers/platform.js';
 
 class FakeClient implements NotificationSink {
   sent: Array<{ method: string; params: any }> = [];
@@ -24,123 +25,179 @@ class FakeClient implements NotificationSink {
   }
 }
 
+// ADR-0003: paths follow the host's rules and each CI runner tests its own native forms. Portable
+// tests build inputs with path.join under os.tmpdir(); hard-coded native paths live in
+// onPosix / onWindows blocks, each with a counterpart for the other platform.
 describe('documentSync', () => {
+  const base = path.join(os.tmpdir(), 'ws');
+  const j = (...segments: string[]) => path.join(base, ...segments);
+  /** `exists` stub reporting which paths are present. */
+  const only = (...present: string[]) => (p: string) => present.includes(p);
+
   describe('projectRootOf', () => {
-    // | Form                  | Input                              | Expected        |
-    // | --------------------- | ---------------------------------- | --------------- |
-    // | macOS / Linux         | /a/proj/input/cql/X.cql            | /a/proj         |
-    // | Windows backslash     | C:\a\proj\input\cql\X.cql          | C:\a\proj       |
-    // | Windows forward slash | C:/a/proj/input/cql/X.cql          | C:/a/proj       |
-    // | No input/cql layout   | /tmp/scratch/X.cql (and Windows)   | the file's dir  |
-    it('returns the directory above input/cql on POSIX paths', () => {
-      expect(projectRootOf('/a/proj/input/cql/X.cql')).to.equal('/a/proj');
-    });
-    it('returns the directory above input/cql on Windows backslash paths', () => {
-      expect(projectRootOf('C:\\a\\proj\\input\\cql\\X.cql')).to.equal('C:\\a\\proj');
-    });
-    it('returns the directory above input/cql on Windows forward-slash paths', () => {
-      expect(projectRootOf('C:/a/proj/input/cql/X.cql')).to.equal('C:/a/proj');
+    // | Host          | Input                      | Expected        |
+    // | ------------- | -------------------------- | --------------- |
+    // | macOS / Linux | /a/proj/input/cql/X.cql    | /a/proj         |
+    // | Windows       | C:\a\proj\input\cql\X.cql  | C:\a\proj       |
+    // | Windows       | C:/a/proj/input/cql/X.cql  | C:\a\proj (normalized) |
+    it('returns the directory above input/cql', () => {
+      expect(projectRootOf(j('a', 'proj', 'input', 'cql', 'X.cql'))).to.equal(j('a', 'proj'));
     });
     it('uses the innermost input/cql when nested', () => {
-      expect(projectRootOf('/a/input/cql/b/input/cql/X.cql')).to.equal('/a/input/cql/b');
+      expect(projectRootOf(j('a', 'input', 'cql', 'b', 'input', 'cql', 'X.cql'))).to.equal(j('a', 'input', 'cql', 'b'));
     });
     it("falls back to the file's directory without an input/cql layout", () => {
-      expect(projectRootOf('/tmp/scratch/X.cql')).to.equal('/tmp/scratch');
-      expect(projectRootOf('C:\\tmp\\scratch\\X.cql')).to.equal('C:\\tmp\\scratch');
-      expect(projectRootOf('C:/tmp/scratch/X.cql')).to.equal('C:/tmp/scratch');
+      expect(projectRootOf(j('tmp', 'scratch', 'X.cql'))).to.equal(j('tmp', 'scratch'));
+    });
+    onPosix('native forms', () => {
+      it('/a/proj/input/cql/X.cql -> /a/proj', () => {
+        expect(projectRootOf('/a/proj/input/cql/X.cql')).to.equal('/a/proj');
+      });
+      it('/input/cql/X.cql -> /', () => {
+        expect(projectRootOf('/input/cql/X.cql')).to.equal('/');
+      });
+      it('/tmp/scratch/X.cql -> /tmp/scratch', () => {
+        expect(projectRootOf('/tmp/scratch/X.cql')).to.equal('/tmp/scratch');
+      });
+    });
+    onWindows('native forms', () => {
+      it('C:\\a\\proj\\input\\cql\\X.cql -> C:\\a\\proj', () => {
+        expect(projectRootOf('C:\\a\\proj\\input\\cql\\X.cql')).to.equal('C:\\a\\proj');
+      });
+      it('C:/a/proj/input/cql/X.cql -> C:\\a\\proj', () => {
+        expect(projectRootOf('C:/a/proj/input/cql/X.cql')).to.equal('C:\\a\\proj');
+      });
+      it('C:\\input\\cql\\X.cql -> C:\\', () => {
+        expect(projectRootOf('C:\\input\\cql\\X.cql')).to.equal('C:\\');
+      });
+      it('C:\\tmp\\scratch\\X.cql -> C:\\tmp\\scratch', () => {
+        expect(projectRootOf('C:\\tmp\\scratch\\X.cql')).to.equal('C:\\tmp\\scratch');
+      });
     });
   });
 
   describe('igRootOf', () => {
-    // `exists` is injected so every path form runs on any host; it reports which ig.ini paths exist.
+    // `exists` is injected; it reports which ig.ini paths exist.
     //
-    // | Form                  | Input                          | ig.ini at        | Expected   |
-    // | --------------------- | ------------------------------ | ---------------- | ---------- |
-    // | macOS / Linux         | /a/proj/input/cql/X.cql        | /a/proj          | /a/proj    |
-    // | Windows backslash     | C:\a\proj\input\cql\X.cql      | C:\a\proj        | C:\a\proj  |
-    // | Windows forward slash | C:/a/proj/input/cql/X.cql      | C:/a/proj        | C:/a/proj  |
-    // | Ancestor ig.ini       | /a/ws/proj/input/cql/X.cql     | /a/ws            | /a/ws/proj |
-    // | No ig.ini anywhere    | /a/proj/input/cql/X.cql        | (none)           | null       |
-    // | No input/cql layout   | /a/proj/temp/probe/X.cql       | /a/proj          | null       |
-    // | Probe with input/cql  | /a/proj/temp/probe/input/cql/X.cql | /a/proj      | /a/proj/temp/probe |
-    const only = (...present: string[]) => (p: string) => present.includes(p);
-
-    it('returns the project root when ig.ini sits beside input/ on POSIX paths', () => {
-      expect(igRootOf('/a/proj/input/cql/X.cql', only('/a/proj/ig.ini'))).to.equal('/a/proj');
-    });
-    it('returns the project root on Windows backslash paths', () => {
-      expect(igRootOf('C:\\a\\proj\\input\\cql\\X.cql', only('C:\\a\\proj\\ig.ini'))).to.equal('C:\\a\\proj');
-    });
-    it('returns the project root on Windows forward-slash paths', () => {
-      expect(igRootOf('C:/a/proj/input/cql/X.cql', only('C:/a/proj/ig.ini'))).to.equal('C:/a/proj');
+    // | Case                  | Input                           | ig.ini at   | Expected           |
+    // | --------------------- | ------------------------------- | ----------- | ------------------ |
+    // | beside input/         | <ws>/a/proj/input/cql/X.cql     | <ws>/a/proj | <ws>/a/proj        |
+    // | ancestor ig.ini       | <ws>/a/ws/proj/input/cql/X.cql  | <ws>/a/ws   | <ws>/a/ws/proj     |
+    // | none anywhere         | <ws>/a/proj/input/cql/X.cql     | (none)      | null               |
+    // | no input/cql layout   | <ws>/a/proj/temp/probe/X.cql    | <ws>/a/proj | null               |
+    // | probe with input/cql  | <ws>/a/proj/temp/probe/input/cql/X.cql | <ws>/a/proj | <ws>/a/proj/temp/probe |
+    it('returns the project root when ig.ini sits beside input/', () => {
+      expect(igRootOf(j('a', 'proj', 'input', 'cql', 'X.cql'), only(j('a', 'proj', 'ig.ini')))).to.equal(j('a', 'proj'));
     });
     it('returns the project root when ig.ini is in an ancestor (multi-project layout)', () => {
-      expect(igRootOf('/a/ws/proj/input/cql/X.cql', only('/a/ws/ig.ini'))).to.equal('/a/ws/proj');
-      expect(igRootOf('C:\\ws\\proj\\input\\cql\\X.cql', only('C:\\ig.ini'))).to.equal('C:\\ws\\proj');
-      expect(igRootOf('/ws/proj/input/cql/X.cql', only('/ig.ini'))).to.equal('/ws/proj');
+      expect(igRootOf(j('a', 'ws', 'proj', 'input', 'cql', 'X.cql'), only(j('a', 'ws', 'ig.ini')))).to.equal(
+        j('a', 'ws', 'proj'),
+      );
     });
     it('does not look inside input/ (the server starts its search at the project root)', () => {
-      expect(igRootOf('/a/proj/input/cql/X.cql', only('/a/proj/input/ig.ini'))).to.equal(null);
+      expect(igRootOf(j('a', 'proj', 'input', 'cql', 'X.cql'), only(j('a', 'proj', 'input', 'ig.ini')))).to.equal(null);
     });
     it('returns null when no ig.ini exists at or above the project root', () => {
-      expect(igRootOf('/a/proj/input/cql/X.cql', only())).to.equal(null);
-      expect(igRootOf('C:/a/proj/input/cql/X.cql', only())).to.equal(null);
+      expect(igRootOf(j('a', 'proj', 'input', 'cql', 'X.cql'), only())).to.equal(null);
     });
     it('returns null without an input/cql layout, even inside an IG (scratch probes)', () => {
-      expect(igRootOf('/a/proj/temp/probe/X.cql', only('/a/proj/ig.ini'))).to.equal(null);
-      expect(igRootOf('C:\\a\\proj\\temp\\probe\\X.cql', only('C:\\a\\proj\\ig.ini'))).to.equal(null);
+      expect(igRootOf(j('a', 'proj', 'temp', 'probe', 'X.cql'), only(j('a', 'proj', 'ig.ini')))).to.equal(null);
     });
     it("gives a probe folder with its own input/cql the enclosing IG's context", () => {
       // The probe root is sent as rootDir; the server then finds the enclosing IG's ig.ini above it.
-      expect(igRootOf('/a/proj/temp/probe/input/cql/X.cql', only('/a/proj/ig.ini'))).to.equal('/a/proj/temp/probe');
-      expect(igRootOf('C:\\a\\proj\\temp\\probe\\input\\cql\\X.cql', only('C:\\a\\proj\\ig.ini'))).to.equal(
-        'C:\\a\\proj\\temp\\probe',
-      );
-      expect(igRootOf('C:/a/proj/temp/probe/input/cql/X.cql', only('C:/a/proj/ig.ini'))).to.equal('C:/a/proj/temp/probe');
+      expect(
+        igRootOf(j('a', 'proj', 'temp', 'probe', 'input', 'cql', 'X.cql'), only(j('a', 'proj', 'ig.ini'))),
+      ).to.equal(j('a', 'proj', 'temp', 'probe'));
+    });
+    onPosix('native forms', () => {
+      it('/a/proj/input/cql/X.cql with /a/proj/ig.ini -> /a/proj', () => {
+        expect(igRootOf('/a/proj/input/cql/X.cql', only('/a/proj/ig.ini'))).to.equal('/a/proj');
+      });
+      it('/ws/proj/input/cql/X.cql with /ig.ini at the file-system root -> /ws/proj', () => {
+        expect(igRootOf('/ws/proj/input/cql/X.cql', only('/ig.ini'))).to.equal('/ws/proj');
+      });
+    });
+    onWindows('native forms', () => {
+      it('C:\\a\\proj\\input\\cql\\X.cql with C:\\a\\proj\\ig.ini -> C:\\a\\proj', () => {
+        expect(igRootOf('C:\\a\\proj\\input\\cql\\X.cql', only('C:\\a\\proj\\ig.ini'))).to.equal('C:\\a\\proj');
+      });
+      it('C:/a/proj/input/cql/X.cql with C:\\a\\proj\\ig.ini -> C:\\a\\proj', () => {
+        expect(igRootOf('C:/a/proj/input/cql/X.cql', only('C:\\a\\proj\\ig.ini'))).to.equal('C:\\a\\proj');
+      });
+      it('C:\\ws\\proj\\input\\cql\\X.cql with C:\\ig.ini at the drive root -> C:\\ws\\proj', () => {
+        expect(igRootOf('C:\\ws\\proj\\input\\cql\\X.cql', only('C:\\ig.ini'))).to.equal('C:\\ws\\proj');
+      });
+      it('returns null without an ig.ini', () => {
+        expect(igRootOf('C:/a/proj/input/cql/X.cql', only())).to.equal(null);
+      });
     });
   });
 
   describe('isUnder / pathKey', () => {
-    it('matches a file inside a folder on POSIX', () => {
-      expect(isUnder('/a/proj/input/cql/X.cql', '/a/proj')).to.equal(true);
-      expect(isUnder('/a/proj/input/cql/X.cql', '/a/proj/')).to.equal(true);
+    it('matches a file inside a folder, with or without a trailing separator', () => {
+      expect(isUnder(j('a', 'proj', 'input', 'cql', 'X.cql'), j('a', 'proj'))).to.equal(true);
+      expect(isUnder(j('a', 'proj', 'input', 'cql', 'X.cql'), j('a', 'proj') + path.sep)).to.equal(true);
     });
     it('does not match a sibling folder that shares a prefix', () => {
-      expect(isUnder('/a/project2/X.cql', '/a/proj')).to.equal(false);
+      expect(isUnder(j('a', 'project2', 'X.cql'), j('a', 'proj'))).to.equal(false);
     });
-    it('treats Windows backslash and forward-slash forms as the same path', () => {
-      expect(isUnder('C:\\a\\proj\\input\\cql\\X.cql', 'C:/a/proj')).to.equal(true);
-      expect(isUnder('C:/a/proj/input/cql/X.cql', 'C:\\a\\proj')).to.equal(true);
+    it('matches a relative file against an absolute folder', () => {
+      const rel = path.join('input', 'cql', 'X.cql');
+      expect(isUnder(rel, process.cwd())).to.equal(true);
+      expect(isUnder(path.resolve(rel), process.cwd())).to.equal(true);
     });
-    it('ignores drive-letter case', () => {
-      expect(isUnder('c:\\a\\proj\\X.cql', 'C:\\a\\proj')).to.equal(true);
-      expect(pathKey('C:\\a\\b\\')).to.equal('c:/a/b');
+    onPosix('native forms', () => {
+      it('/a/proj/input/cql/X.cql is under /a/proj and /a/proj/', () => {
+        expect(isUnder('/a/proj/input/cql/X.cql', '/a/proj')).to.equal(true);
+        expect(isUnder('/a/proj/input/cql/X.cql', '/a/proj/')).to.equal(true);
+      });
+      it('pathKey keeps the root and strips a trailing slash', () => {
+        expect(pathKey('/')).to.equal('/');
+        expect(pathKey('/a/b/')).to.equal('/a/b');
+      });
+    });
+    onWindows('native forms', () => {
+      it('treats backslash and forward-slash forms as the same path', () => {
+        expect(isUnder('C:\\a\\proj\\input\\cql\\X.cql', 'C:/a/proj')).to.equal(true);
+        expect(isUnder('C:/a/proj/input/cql/X.cql', 'C:\\a\\proj')).to.equal(true);
+      });
+      it('ignores drive-letter case and trailing separators; keeps the drive root', () => {
+        expect(isUnder('c:\\a\\proj\\X.cql', 'C:\\a\\proj')).to.equal(true);
+        expect(pathKey('C:\\a\\b\\')).to.equal('c:/a/b');
+        expect(pathKey('C:\\')).to.equal('c:/');
+      });
     });
   });
 
   describe('pathKey platform table', () => {
-    // pathKey(input, platform, cwd) must give the same key on every host for each row.
+    // pathKey(input, platform, cwd) picks path.win32 or path.posix by `platform` only, so every
+    // row runs on every host (a test seam, not product behaviour).
     //
-    // | Input                           | Platform | cwd        | Key                      |
-    // | ------------------------------- | -------- | ---------- | ------------------------ |
-    // | /a/proj/X.cql                   | linux    | /ws        | /a/proj/X.cql            |
-    // | C:\a\proj\X.cql                 | win32    | C:\ws      | c:/a/proj/X.cql          |
-    // | C:/a/proj/X.cql                 | win32    | C:\ws      | c:/a/proj/X.cql          |
-    // | C:\a\proj\X.cql                 | linux    | /ws        | c:/a/proj/X.cql          |
-    // | C:/a/proj/X.cql                 | darwin   | /ws        | c:/a/proj/X.cql          |
-    // | input/cql/X.cql (relative)      | win32    | C:\ws      | c:/ws/input/cql/X.cql    |
-    // | input/cql/X.cql (relative)      | linux    | /ws        | /ws/input/cql/X.cql      |
-    // | /a/proj/X.cql (POSIX form)      | win32    | C:\ws      | c:/a/proj/X.cql          |
-    // | \\\\srv\\share\\X.cql (UNC)     | win32    | C:\ws      | //srv/share/X.cql        |
+    // | Input                         | Platform | cwd      | Key                              |
+    // | ----------------------------- | -------- | -------- | -------------------------------- |
+    // | /a/proj/X.cql                 | linux    | /ws      | /a/proj/X.cql                    |
+    // | input/cql/X.cql (relative)    | linux    | /ws      | /ws/input/cql/X.cql              |
+    // | /a/proj/ (trailing slash)     | darwin   | /ws      | /a/proj                          |
+    // | /                             | linux    | /ws      | /                                |
+    // | C:\a\proj\X.cql (a filename)  | linux    | /ws      | /ws/C:\a\proj\X.cql              |
+    // | C:\a\proj\X.cql                | win32    | C:\ws    | c:/a/proj/X.cql                  |
+    // | C:/a/proj/X.cql               | win32    | C:\ws    | c:/a/proj/X.cql                  |
+    // | input/cql/X.cql (relative)    | win32    | C:\ws    | c:/ws/input/cql/X.cql            |
+    // | /a/proj/X.cql (drive-relative)| win32    | C:\ws    | c:/a/proj/X.cql                  |
+    // | C:\                           | win32    | C:\ws    | c:/                              |
+    // | \\srv\share\X.cql (UNC)       | win32    | C:\ws    | //srv/share/X.cql                |
     const rows: Array<[string, NodeJS.Platform, string, string]> = [
       ['/a/proj/X.cql', 'linux', '/ws', '/a/proj/X.cql'],
+      ['input/cql/X.cql', 'linux', '/ws', '/ws/input/cql/X.cql'],
+      ['/a/proj/', 'darwin', '/ws', '/a/proj'],
+      ['/', 'linux', '/ws', '/'],
+      // On POSIX a backslash is an ordinary filename character (ADR-0003).
+      ['C:\\a\\proj\\X.cql', 'linux', '/ws', '/ws/C:\\a\\proj\\X.cql'],
       ['C:\\a\\proj\\X.cql', 'win32', 'C:\\ws', 'c:/a/proj/X.cql'],
       ['C:/a/proj/X.cql', 'win32', 'C:\\ws', 'c:/a/proj/X.cql'],
-      ['C:\\a\\proj\\X.cql', 'linux', '/ws', 'c:/a/proj/X.cql'],
-      ['C:/a/proj/X.cql', 'darwin', '/ws', 'c:/a/proj/X.cql'],
       ['input/cql/X.cql', 'win32', 'C:\\ws', 'c:/ws/input/cql/X.cql'],
-      ['input/cql/X.cql', 'linux', '/ws', '/ws/input/cql/X.cql'],
       ['/a/proj/X.cql', 'win32', 'C:\\ws', 'c:/a/proj/X.cql'],
+      ['C:\\', 'win32', 'C:\\ws', 'c:/'],
       ['\\\\srv\\share\\X.cql', 'win32', 'C:\\ws', '//srv/share/X.cql'],
     ];
     for (const [input, platform, cwd, expected] of rows) {
@@ -149,52 +206,79 @@ describe('documentSync', () => {
       });
     }
 
-    // The bug in one line: a key built from a path must equal the key of the same path coming
-    // back from a file:// URI (which is how incoming diagnostics are keyed). It must hold on the
-    // current host for relative, POSIX-form and Windows-form inputs.
-    const roundTrips = ['input/cql/X.cql', '/a/proj/X.cql', 'C:\\a\\proj\\X.cql', 'C:/a/proj/X.cql'];
-    for (const input of roundTrips) {
-      it(`pathKey(uriToPath(pathToUri(${JSON.stringify(input)}))) equals pathKey(input) on this host`, () => {
+    // The Windows-host bug in one line: a key built from a path must equal the key of the same
+    // path coming back from a file:// URI (how incoming diagnostics are keyed).
+    it('pathKey(uriToPath(pathToUri(p))) equals pathKey(p) for relative and absolute paths', () => {
+      for (const input of [path.join('input', 'cql', 'X.cql'), j('a', 'proj', 'X.cql')]) {
         expect(pathKey(uriToPath(pathToUri(input)))).to.equal(pathKey(input));
+      }
+    });
+    onWindows('native round trips', () => {
+      it('backslash and forward-slash inputs round-trip', () => {
+        for (const input of ['C:\\a\\proj\\X.cql', 'C:/a/proj/X.cql']) {
+          expect(pathKey(uriToPath(pathToUri(input)))).to.equal(pathKey(input));
+        }
       });
-    }
-
-    it('keys agree for isUnder with a relative file and an absolute folder on this host', () => {
-      const rel = path.join('input', 'cql', 'X.cql');
-      expect(isUnder(rel, process.cwd())).to.equal(true);
-      expect(isUnder(path.resolve(rel), process.cwd())).to.equal(true);
+      // The language server may send either drive-letter form; both must reach the same key.
+      it('file:///C:/... and file:///c%3A/... give the same key', () => {
+        const a = pathKey(uriToPath('file:///C:/a/proj/X.cql'));
+        const b = pathKey(uriToPath('file:///c%3A/a/proj/X.cql'));
+        expect(a).to.equal('c:/a/proj/X.cql');
+        expect(b).to.equal(a);
+      });
+    });
+    onPosix('native round trips', () => {
+      it('an absolute POSIX path round-trips through a URI', () => {
+        expect(pathKey(uriToPath(pathToUri('/a/proj/X.cql')))).to.equal('/a/proj/X.cql');
+      });
     });
   });
 
   describe('ensureWorkspaceFolder', () => {
     it('adds nothing when a registered folder already contains the file', () => {
       const c = new FakeClient();
-      registerWorkspaceFolder(c, '/ws');
-      expect(ensureWorkspaceFolder(c, '/ws/input/cql/X.cql')).to.equal(null);
+      registerWorkspaceFolder(c, j());
+      expect(ensureWorkspaceFolder(c, j('input', 'cql', 'X.cql'))).to.equal(null);
       expect(c.sent).to.have.length(0);
     });
     it("adds the file's project root when no folder contains it, once", () => {
       const c = new FakeClient();
-      registerWorkspaceFolder(c, '/ws');
-      expect(ensureWorkspaceFolder(c, '/tmp/probe/input/cql/A.cql')).to.equal('/tmp/probe');
-      expect(ensureWorkspaceFolder(c, '/tmp/probe/input/cql/B.cql')).to.equal(null);
+      registerWorkspaceFolder(c, j());
+      const probe = path.join(os.tmpdir(), 'probe-x');
+      expect(ensureWorkspaceFolder(c, path.join(probe, 'input', 'cql', 'A.cql'))).to.equal(probe);
+      expect(ensureWorkspaceFolder(c, path.join(probe, 'input', 'cql', 'B.cql'))).to.equal(null);
       expect(c.methods()).to.deep.equal(['workspace/didChangeWorkspaceFolders']);
       const added = c.sent[0]!.params.event.added;
-      expect(added).to.deep.equal([{ uri: pathToUri('/tmp/probe'), name: 'probe' }]);
+      expect(added).to.deep.equal([{ uri: pathToUri(probe), name: 'probe-x' }]);
       expect(c.sent[0]!.params.event.removed).to.deep.equal([]);
-    });
-    it('adds a Windows project root with a file URI', () => {
-      const c = new FakeClient();
-      ensureWorkspaceFolder(c, 'C:\\tmp\\probe\\input\\cql\\A.cql');
-      expect(c.sent[0]!.params.event.added[0].uri).to.equal(pathToUri('C:\\tmp\\probe'));
     });
     it('keeps state per client', () => {
       const a = new FakeClient();
       const b = new FakeClient();
-      ensureWorkspaceFolder(a, '/tmp/x/A.cql');
-      ensureWorkspaceFolder(b, '/tmp/x/A.cql');
+      const file = path.join(os.tmpdir(), 'tmp-x', 'A.cql');
+      ensureWorkspaceFolder(a, file);
+      ensureWorkspaceFolder(b, file);
       expect(a.sent).to.have.length(1);
       expect(b.sent).to.have.length(1);
+    });
+    onPosix('native forms', () => {
+      it('adds /tmp/probe with its file URI', () => {
+        const c = new FakeClient();
+        ensureWorkspaceFolder(c, '/tmp/probe/input/cql/A.cql');
+        expect(c.sent[0]!.params.event.added[0]).to.deep.equal({ uri: 'file:///tmp/probe', name: 'probe' });
+      });
+    });
+    onWindows('native forms', () => {
+      it('adds C:\\tmp\\probe (backslash input) with its file URI', () => {
+        const c = new FakeClient();
+        ensureWorkspaceFolder(c, 'C:\\tmp\\probe\\input\\cql\\A.cql');
+        expect(c.sent[0]!.params.event.added[0]).to.deep.equal({ uri: 'file:///C:/tmp/probe', name: 'probe' });
+      });
+      it('treats forward-slash input as the same folder', () => {
+        const c = new FakeClient();
+        registerWorkspaceFolder(c, 'C:\\tmp\\probe');
+        expect(ensureWorkspaceFolder(c, 'C:/tmp/probe/input/cql/A.cql')).to.equal(null);
+      });
     });
   });
 

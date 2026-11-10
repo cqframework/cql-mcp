@@ -4,6 +4,9 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver-protocol';
 import { LspClient } from '../../../src/lsp/lspClient.js';
 import { createChannel, createServerConnection } from '../../helpers/channel.js';
 import { pathToUri } from '../../../src/workspace/paths.js';
+import { onPosix, onWindows } from '../../helpers/platform.js';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 describe('lsp/diagnosticsAccumulator', () => {
   let client: LspClient | null = null;
@@ -118,7 +121,9 @@ describe('lsp/diagnosticsAccumulator', () => {
     expect(result).to.deep.equal([]);
   });
 
-  it('normalizes Windows-form file URIs and Windows backslash paths across lookups', async () => {
+  // Diagnostics arrive keyed by file URI and are looked up by path; both must reach the same key.
+  // Each host tests its own native forms (ADR-0003).
+  async function setupClient() {
     const channel = createChannel();
     const created = LspClient.create(
       new StreamMessageReader(channel.client.read),
@@ -127,28 +132,48 @@ describe('lsp/diagnosticsAccumulator', () => {
     client = created.client;
     const server = createServerConnection(channel.server);
     serverDispose = () => server.dispose();
+    return { server, lsp: created.client };
+  }
+  const diag: Diagnostic = {
+    message: 'Path test error',
+    severity: DiagnosticSeverity.Error,
+    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+  };
 
-    const winUri = 'file:///C:/projects/my-ig/input/cql/Measure.cql';
-    const winPathBackslash = 'C:\\projects\\my-ig\\input\\cql\\Measure.cql';
-    const winPathForward = 'c:/projects/my-ig/input/cql/Measure.cql';
+  onPosix('native paths', () => {
+    it('matches a URI to absolute and relative lookups', async () => {
+      const { server, lsp } = await setupClient();
+      const file = path.join(os.tmpdir(), 'my-ig', 'input', 'cql', 'Measure.cql');
+      server.sendNotification('textDocument/publishDiagnostics', { uri: pathToUri(file), diagnostics: [diag] });
 
-    const diag: Diagnostic = {
-      message: 'Windows test error',
-      severity: DiagnosticSeverity.Error,
-      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
-    };
+      expect(await lsp.waitForDiagnostics(file, 500, 20)).to.deep.equal([diag]);
+      expect(lsp.getDiagnostics(path.relative(process.cwd(), file))).to.deep.equal([diag]);
+    });
+  });
 
-    server.sendNotification('textDocument/publishDiagnostics', {
-      uri: winUri,
-      diagnostics: [diag],
+  onWindows('native paths', () => {
+    it('normalizes file URIs and backslash/forward-slash paths across lookups', async () => {
+      const { server, lsp } = await setupClient();
+      server.sendNotification('textDocument/publishDiagnostics', {
+        uri: 'file:///C:/projects/my-ig/input/cql/Measure.cql',
+        diagnostics: [diag],
+      });
+
+      const received = await lsp.waitForDiagnostics('C:\\projects\\my-ig\\input\\cql\\Measure.cql', 500, 20);
+      expect(received).to.deep.equal([diag]);
+      // Forward slash and lower-case drive letter.
+      expect(lsp.getDiagnostics('c:/projects/my-ig/input/cql/Measure.cql')).to.deep.equal([diag]);
     });
 
-    const received = await client.waitForDiagnostics(winPathBackslash, 500, 20);
-    expect(received).to.deep.equal([diag]);
+    it('matches a URI with an encoded drive colon (file:///c%3A/...)', async () => {
+      const { server, lsp } = await setupClient();
+      server.sendNotification('textDocument/publishDiagnostics', {
+        uri: 'file:///c%3A/projects/my-ig/input/cql/Measure.cql',
+        diagnostics: [diag],
+      });
 
-    // Lookup via forward slash and lower-case drive letter
-    expect(client.getDiagnostics(winPathForward)).to.deep.equal([diag]);
-    // Lookup via backslash and uppercase drive letter
-    expect(client.getDiagnostics(winPathBackslash)).to.deep.equal([diag]);
+      const received = await lsp.waitForDiagnostics('C:\\projects\\my-ig\\input\\cql\\Measure.cql', 500, 20);
+      expect(received).to.deep.equal([diag]);
+    });
   });
 });
