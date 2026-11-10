@@ -8,6 +8,7 @@ import type {
   DapEvaluationResult,
 } from '../../../src/dap/dapSession.js';
 import { buildDebugTools, debugVersionWarning } from '../../../src/tools/debugTools.js';
+import { invalidArgNames } from '../../helpers/toolsContract.js';
 
 interface FakeSession extends Pick<
   DapSession,
@@ -140,17 +141,9 @@ describe('debugTools', () => {
     expect(session.startedWith?.breakpoints).to.equal(undefined);
   });
 
-  it('cql_debug_start requires cqlFile', async () => {
-    const session = makeFakeSession();
-    const tool = findTool('cql_debug_start', session);
-    let threw = false;
-    try {
-      await tool.handler({} as never, {});
-    } catch (err) {
-      threw = true;
-      expect((err as Error).message).to.match(/Missing required argument: cqlFile/);
-    }
-    expect(threw).to.equal(true);
+  it('cql_debug_start requires cqlFile', () => {
+    const tool = findTool('cql_debug_start', makeFakeSession());
+    expect(invalidArgNames(tool, {})).to.deep.equal(['cqlFile']);
   });
 
   it('cql_debug_set_breakpoints filters non-positive integers', async () => {
@@ -176,17 +169,10 @@ describe('debugTools', () => {
     ]);
   });
 
-  it('cql_debug_evaluate requires expression', async () => {
-    const session = makeFakeSession();
-    const tool = findTool('cql_debug_evaluate', session);
-    let threw = false;
-    try {
-      await tool.handler({} as never, {});
-    } catch (err) {
-      threw = true;
-      expect((err as Error).message).to.match(/Missing required argument: expression/);
-    }
-    expect(threw).to.equal(true);
+  it('cql_debug_evaluate requires expression', () => {
+    const tool = findTool('cql_debug_evaluate', makeFakeSession());
+    expect(invalidArgNames(tool, {})).to.deep.equal(['expression']);
+    expect(invalidArgNames(tool, { expression: '' })).to.deep.equal(['expression']);
   });
 
   it('cql_debug_stop sets active=false', async () => {

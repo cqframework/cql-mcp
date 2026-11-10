@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver-protocol';
 import { VIEW_ELM } from '../lsp/lspCommands.js';
 import { ensureWorkspaceFolder, syncCqlDocument } from '../lsp/documentSync.js';
-import { missing } from './defs.js';
+import { z } from 'zod';
 import type { Tool, McpContext } from './defs.js';
 import { pathToUri } from '../workspace/paths.js';
 
@@ -37,37 +37,23 @@ export const validateTool: Tool = {
   description:
     'Validates a CQL file or in-memory CQL content for syntax and type errors without executing patient bundles, returning compiler diagnostics and translation errors.',
   inputSchema: {
-    type: 'object',
-    properties: {
-      cqlFile: {
-        type: 'string',
-        description: 'Path to the .cql file',
-      },
-      content: {
-        type: 'string',
-        description:
-          'Optional in-memory CQL content to validate without saving to disk. Overrides file contents on disk.',
-      },
-      timeoutMs: {
-        type: 'number',
-        description: 'Maximum milliseconds to wait for compiler diagnostics. Defaults to 2000.',
-        default: 2000,
-      },
-      quiescenceMs: {
-        type: 'number',
-        description:
-          'Milliseconds of quiet time after receiving diagnostics before settling. Defaults to 100.',
-        default: 100,
-      },
-    },
-    required: ['cqlFile'],
-    additionalProperties: false,
+    cqlFile: z.string().min(1).describe('Path to the .cql file'),
+    content: z
+      .string()
+      .optional()
+      .describe(
+        'Optional in-memory CQL content to validate without saving to disk. Overrides file contents on disk.',
+      ),
+    timeoutMs: z
+      .number()
+      .default(2000)
+      .describe('Maximum milliseconds to wait for compiler diagnostics. Defaults to 2000.'),
+    quiescenceMs: z
+      .number()
+      .default(100)
+      .describe('Milliseconds of quiet time after receiving diagnostics before settling. Defaults to 100.'),
   },
   handler: async (ctx: McpContext, args: Record<string, unknown>) => {
-    const missingFile = missing(args, 'cqlFile');
-    if (missingFile) {
-      throw new Error(missingFile);
-    }
     const cqlFile = path.resolve(args.cqlFile as string);
     const inMemoryContent = args.content as string | undefined;
 

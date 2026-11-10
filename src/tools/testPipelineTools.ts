@@ -9,7 +9,8 @@ import {
 } from '../testPipeline/resultStore.js';
 import { runFile, runSuite } from '../testPipeline/suiteRunner.js';
 import type { Tool } from './defs.js';
-import { missing, expectString } from './defs.js';
+import { z } from 'zod';
+import { cqlParametersSchema } from './schemas.js';
 
 // Shared by both run tools so callers read the status the way it is computed (suiteRunner.toCaseResult).
 const CASE_STATUS_NOTE =
@@ -26,17 +27,6 @@ function ensureDeps(process: CqlLsProcess, workspaceRoot: string) {
   return { process, workspaceRoot };
 }
 
-const COMMON_PROPS = (suiteName: string | null) => ({
-  suiteName: {
-    type: 'string',
-    description: suiteName ? `Suite (library) name. ${suiteName}` : 'Suite (library) name.',
-  },
-  workspaceRoot: {
-    type: 'string',
-    description: 'Workspace root under which .cql-debug/test-runs is stored. Defaults to MCP CWD.',
-  },
-});
-
 export const runFileTool: Tool = {
   name: 'cql_test_run_file',
   description:
@@ -48,44 +38,31 @@ export const runFileTool: Tool = {
     ' ' +
     CASE_STATUS_NOTE,
   inputSchema: {
-    type: 'object',
-    properties: {
-      cqlFile: { type: 'string', description: 'Path to the .cql file to execute' },
-      fhirVersion: { type: 'string', description: 'FHIR version, e.g. R4 (default R4)', default: 'R4' },
-      contextValues: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Patient/context values to run against (one library request per value)',
-      },
-      parameters: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: { name: { type: 'string' }, type: { type: 'string' }, value: { type: 'string' } },
-          required: ['name', 'value'],
-        },
-      },
-      terminologyUri: { type: 'string' },
-      optionsPath: { type: 'string' },
-      rootDir: { type: 'string' },
-      libraryVersion: { type: 'string' },
-      modelUri: {
-        type: 'string',
-        description: 'Directory of FHIR resources (e.g. one test-case folder) to evaluate against.',
-      },
-      suiteName: {
-        type: 'string',
-        description:
-          'Logical suite name. Defaults to the CQL file stem. Used to group runs in listings and diffs.',
-      },
-      workspaceRoot: COMMON_PROPS(null).workspaceRoot,
-    },
-    required: ['cqlFile'],
-    additionalProperties: false,
+    cqlFile: z.string().min(1).describe('Path to the .cql file to execute'),
+    fhirVersion: z.string().default('R4').describe('FHIR version, e.g. R4 (default R4)'),
+    contextValues: z
+      .array(z.string())
+      .optional()
+      .describe('Patient/context values to run against (one library request per value)'),
+    parameters: cqlParametersSchema.optional(),
+    terminologyUri: z.string().optional(),
+    optionsPath: z.string().optional(),
+    rootDir: z.string().optional(),
+    libraryVersion: z.string().optional(),
+    modelUri: z
+      .string()
+      .optional()
+      .describe('Directory of FHIR resources (e.g. one test-case folder) to evaluate against.'),
+    suiteName: z
+      .string()
+      .optional()
+      .describe('Logical suite name. Defaults to the CQL file stem. Used to group runs in listings and diffs.'),
+    workspaceRoot: z
+      .string()
+      .optional()
+      .describe('Workspace root under which .cql-debug/test-runs is stored. Defaults to MCP CWD.'),
   },
   handler: async (ctx, args) => {
-    const m = missing(args, 'cqlFile');
-    if (m) throw new Error(m);
     const cqlFile = path.resolve(args.cqlFile as string);
     const workspaceRoot = (args.workspaceRoot as string | undefined) ?? ctx.workspaceRoot;
     return runFile(ensureDeps(ctx.process, workspaceRoot), {
@@ -114,44 +91,43 @@ export const runSuiteTool: Tool = {
     ' ' +
     CASE_STATUS_NOTE,
   inputSchema: {
-    type: 'object',
-    properties: {
-      cqlFile: { type: 'string', description: 'Path to the .cql library file' },
-      suiteRoot: {
-        type: 'string',
-        description:
-          'Parent directory containing one subdirectory per library/suite (Layout A: each subdirectory contains test-case dirs).',
-      },
-      suiteName: { type: 'string', description: 'Suite (library) name — selects the subdirectory under suiteRoot.' },
-      configPath: {
-        type: 'string',
-        description:
-          'Optional path to a .jsonc config file. Loads .jsonc preferentially over .json if both exist at the same path.',
-      },
-      excludeTestCases: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Test case (subdirectory) names to exclude; unioned with config.testCasesToExclude.',
-      },
-      fhirVersion: { type: 'string', description: 'FHIR version (default R4)', default: 'R4' },
-      rootDir: { type: 'string', description: 'IG project root. Defaults to the IG root of cqlFile.' },
-      terminologyUri: {
-        type: 'string',
-        description: 'Terminology directory. Defaults to <IG root>/input/vocabulary/valueset.',
-      },
-      optionsPath: {
-        type: 'string',
-        description: 'cql-options file. Defaults to <IG root>/input/cql/cql-options.json.',
-      },
-      workspaceRoot: COMMON_PROPS(null).workspaceRoot,
-    },
-    required: ['cqlFile', 'suiteRoot', 'suiteName'],
-    additionalProperties: false,
+    cqlFile: z.string().min(1).describe('Path to the .cql library file'),
+    suiteRoot: z
+      .string()
+      .min(1)
+      .describe(
+        'Parent directory containing one subdirectory per library/suite (Layout A: each subdirectory contains test-case dirs).',
+      ),
+    suiteName: z
+      .string()
+      .min(1)
+      .describe('Suite (library) name — selects the subdirectory under suiteRoot.'),
+    configPath: z
+      .string()
+      .optional()
+      .describe(
+        'Optional path to a .jsonc config file. Loads .jsonc preferentially over .json if both exist at the same path.',
+      ),
+    excludeTestCases: z
+      .array(z.string())
+      .optional()
+      .describe('Test case (subdirectory) names to exclude; unioned with config.testCasesToExclude.'),
+    fhirVersion: z.string().default('R4').describe('FHIR version (default R4)'),
+    rootDir: z.string().optional().describe('IG project root. Defaults to the IG root of cqlFile.'),
+    terminologyUri: z
+      .string()
+      .optional()
+      .describe('Terminology directory. Defaults to <IG root>/input/vocabulary/valueset.'),
+    optionsPath: z
+      .string()
+      .optional()
+      .describe('cql-options file. Defaults to <IG root>/input/cql/cql-options.json.'),
+    workspaceRoot: z
+      .string()
+      .optional()
+      .describe('Workspace root under which .cql-debug/test-runs is stored. Defaults to MCP CWD.'),
   },
   handler: async (ctx, args) => {
-    const miss =
-      missing(args, 'cqlFile') ?? missing(args, 'suiteRoot') ?? missing(args, 'suiteName');
-    if (miss) throw new Error(miss);
     const cqlFile = path.resolve(args.cqlFile as string);
     const suiteRoot = path.resolve(args.suiteRoot as string);
     const suiteName = args.suiteName as string;
@@ -176,13 +152,12 @@ export const listRunsTool: Tool = {
   description:
     'List previously persisted test runs (newest-first). Optionally filter by suite and limit the count.',
   inputSchema: {
-    type: 'object',
-    properties: {
-      suiteName: COMMON_PROPS('Filters to runs of this suite only.').suiteName,
-      limit: { type: 'integer', description: 'Maximum number of runs to return', minimum: 1 },
-      workspaceRoot: COMMON_PROPS(null).workspaceRoot,
-    },
-    additionalProperties: false,
+    suiteName: z.string().optional().describe('Suite (library) name. Filters to runs of this suite only.'),
+    limit: z.number().int().min(1).max(1000).optional().describe('Maximum number of runs to return'),
+    workspaceRoot: z
+      .string()
+      .optional()
+      .describe('Workspace root under which .cql-debug/test-runs is stored. Defaults to MCP CWD.'),
   },
   handler: async (ctx, args) => {
     const workspaceRoot = (args.workspaceRoot as string | undefined) ?? ctx.workspaceRoot;
@@ -209,31 +184,26 @@ export const diffTool: Tool = {
     'or pass "latest"/"previous" to use the pointer files for the suite. If no previous run has been recorded, ' +
     'returns a no_previous_run status (not an error).',
   inputSchema: {
-    type: 'object',
-    properties: {
-      suiteName: COMMON_PROPS('Required. Suite whose runs should be diffed.').suiteName,
-      runA: {
-        type: 'string',
-        description:
-          'Hash prefix (8+ chars) or timestamp (or timestamp prefix) of the first run, as listed by cql_test_list_runs ' +
+    suiteName: z.string().describe('Suite (library) name. Required. Suite whose runs should be diffed.'),
+    runA: z
+      .string()
+      .describe(
+        'Hash prefix (8+ chars) or timestamp (or timestamp prefix) of the first run, as listed by cql_test_list_runs ' +
           '(ISO form with ":" and "." also accepted, any case). Use "latest" or "previous" to use pointer files.',
-      },
-      runB: {
-        type: 'string',
-        description:
-          'Hash prefix (8+ chars) or timestamp (or timestamp prefix) of the second run, as listed by cql_test_list_runs ' +
+      ),
+    runB: z
+      .string()
+      .describe(
+        'Hash prefix (8+ chars) or timestamp (or timestamp prefix) of the second run, as listed by cql_test_list_runs ' +
           '(ISO form with ":" and "." also accepted, any case). Use "latest" or "previous" to use pointer files.',
-      },
-      workspaceRoot: COMMON_PROPS(null).workspaceRoot,
-    },
-    required: ['suiteName', 'runA', 'runB'],
-    additionalProperties: false,
+      ),
+    workspaceRoot: z
+      .string()
+      .optional()
+      .describe('Workspace root under which .cql-debug/test-runs is stored. Defaults to MCP CWD.'),
   },
   handler: async (ctx, args) => {
     const suiteName = args.suiteName as string;
-    const typeErr =
-      expectString(args, 'suiteName') ?? expectString(args, 'runA') ?? expectString(args, 'runB');
-    if (typeErr) throw new Error(typeErr);
     const workspaceRoot = (args.workspaceRoot as string | undefined) ?? ctx.workspaceRoot;
 
     const refA = (args.runA as string).trim();

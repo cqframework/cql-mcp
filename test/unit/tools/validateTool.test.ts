@@ -4,16 +4,12 @@ import { DiagnosticSeverity } from 'vscode-languageserver-protocol';
 import { validateTool } from '../../../src/tools/validateTool.js';
 import type { McpContext } from '../../../src/tools/defs.js';
 import { fixedRuntime } from '../../helpers/fixedRuntime.js';
+import { invalidArgNames } from '../../helpers/toolsContract.js';
 
 describe('tools/validateTool', () => {
-  it('throws an error if cqlFile argument is missing', async () => {
-    let error: Error | null = null;
-    try {
-      await validateTool.handler({} as McpContext, {});
-    } catch (err) {
-      error = err as Error;
-    }
-    expect(error?.message).to.include('Missing required argument: cqlFile');
+  it('requires cqlFile (validated by the schema; see server.test.ts for the isError result)', () => {
+    expect(invalidArgNames(validateTool, {})).to.deep.equal(['cqlFile']);
+    expect(invalidArgNames(validateTool, { cqlFile: '' })).to.deep.equal(['cqlFile']);
   });
 
   it('throws an error if file does not exist and content is not provided', async () => {

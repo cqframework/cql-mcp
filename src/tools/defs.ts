@@ -1,3 +1,5 @@
+import type { ZodRawShape } from 'zod';
+import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import type { CqlLsProcess } from '../jvm/cqlLsProcess.js';
 import type { RuntimeResolver } from '../jvm/runtimeResolver.js';
 import type { DapSession } from '../dap/dapSession.js';
@@ -9,25 +11,16 @@ export interface McpContext {
   workspaceRoot: string;
 }
 
+/**
+ * A tool. `inputSchema` is a zod raw shape (ADR-0004 §2.2): src/tools/register.ts validates
+ * arguments against it, and `tools/list` publishes its JSON schema. Handlers receive the
+ * validated arguments, and report any failure by throwing (the adapter turns it into an
+ * `isError` result).
+ */
 export interface Tool {
   name: string;
   description: string;
-  inputSchema: Record<string, unknown>;
+  inputSchema: ZodRawShape;
+  annotations?: ToolAnnotations;
   handler: (ctx: McpContext, args: Record<string, unknown>) => Promise<unknown>;
-}
-
-export function missing(args: Record<string, unknown>, key: string): string | null {
-  const value = args[key];
-  if (value === undefined || value === null || value === '') {
-    return `Missing required argument: ${key}`;
-  }
-  return null;
-}
-
-export function expectString(args: Record<string, unknown>, key: string): string | null {
-  const value = args[key];
-  if (value !== undefined && typeof value !== 'string') {
-    return `Argument '${key}' must be a string`;
-  }
-  return null;
 }

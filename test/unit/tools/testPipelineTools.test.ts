@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import type { CqlLsProcess } from '../../../src/jvm/cqlLsProcess.js';
 import type { DapSession } from '../../../src/dap/dapSession.js';
 import type { McpContext } from '../../../src/tools/defs.js';
+import { invalidArgNames } from '../../helpers/toolsContract.js';
 import {
   buildTestPipelineTools,
   diffTool,
@@ -95,15 +96,8 @@ describe('tools/testPipelineTools', () => {
   });
 
   describe('runFileTool', () => {
-    it('requires cqlFile', async () => {
-      const ctx = mkContext({ workspaceRoot: mkRoot() });
-      try {
-        await runFileTool.handler(ctx, {});
-      } catch (e) {
-        expect((e as Error).message).to.include('cqlFile');
-        return;
-      }
-      expect.fail('expected throw');
+    it('requires cqlFile', () => {
+      expect(invalidArgNames(runFileTool, {})).to.deep.equal(['cqlFile']);
     });
 
     it('persists run via suiteRunner.runFile and returns RunRecord', async () => {
@@ -134,15 +128,9 @@ describe('tools/testPipelineTools', () => {
   });
 
   describe('runSuiteTool', () => {
-    it('requires cqlFile, suiteRoot, suiteName', async () => {
-      const ctx = mkContext({ workspaceRoot: mkRoot() });
-      try {
-        await runSuiteTool.handler(ctx, { suiteRoot: '/x', suiteName: 'S' });
-      } catch (e) {
-        expect((e as Error).message).to.include('cqlFile');
-        return;
-      }
-      expect.fail('expected throw');
+    it('requires cqlFile, suiteRoot, suiteName', () => {
+      expect(invalidArgNames(runSuiteTool, { suiteRoot: '/x', suiteName: 'S' })).to.deep.equal(['cqlFile']);
+      expect(invalidArgNames(runSuiteTool, {})).to.have.members(['cqlFile', 'suiteRoot', 'suiteName']);
     });
 
     it('runs discovered cases', async () => {

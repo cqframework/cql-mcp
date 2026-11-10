@@ -9,7 +9,8 @@ import type {
 } from '../lsp/protocol.js';
 import { libraryNameOf, pathToUri } from '../workspace/paths.js';
 import { ensureWorkspaceFolder, igRootOf, syncCqlDocument } from '../lsp/documentSync.js';
-import { missing, expectString } from './defs.js';
+import { z } from 'zod';
+import { cqlParametersSchema } from './schemas.js';
 import type { Tool } from './defs.js';
 
 export interface CqlExecuteToolArgs {
@@ -160,77 +161,38 @@ export const executeCqlTool: Tool = {
     '<root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json; explicit arguments override. ' +
     'Other files get no rootDir. Patient data is only read when modelUri is set.',
   inputSchema: {
-    type: 'object',
-    properties: {
-      cqlFile: { type: 'string', description: 'Path to the .cql file to execute' },
-      fhirVersion: {
-        type: 'string',
-        description: 'FHIR version, e.g. R4 (default R4)',
-        default: 'R4',
-      },
-      contextValues: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Patient/context values; one library request is built per value',
-      },
-      parameters: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            name: { type: 'string' },
-            type: { type: 'string' },
-            value: { type: 'string' },
-          },
-          required: ['name', 'value'],
-        },
-      },
-      terminologyUri: {
-        type: 'string',
-        description: 'Path to a terminology directory/file. Defaults to <IG root>/input/vocabulary/valueset.',
-      },
-      optionsPath: {
-        type: 'string',
-        description: 'Path to a cql-options file. Defaults to <IG root>/input/cql/cql-options.json.',
-      },
-      rootDir: {
-        type: 'string',
-        description:
-          'IG project root (where the LS finds ig.ini and loads IG packages). Defaults to the IG root of cqlFile; none outside an IG.',
-      },
-      libraryVersion: { type: 'string' },
-      modelUri: {
-        type: 'string',
-        description:
-          'Filesystem path to a directory of FHIR resources (IgStandardRepository root). ' +
+    cqlFile: z.string().min(1).describe('Path to the .cql file to execute'),
+    fhirVersion: z.string().default('R4').describe('FHIR version, e.g. R4 (default R4)'),
+    contextValues: z
+      .array(z.string())
+      .optional()
+      .describe('Patient/context values; one library request is built per value'),
+    parameters: cqlParametersSchema.optional(),
+    terminologyUri: z
+      .string()
+      .optional()
+      .describe('Path to a terminology directory/file. Defaults to <IG root>/input/vocabulary/valueset.'),
+    optionsPath: z
+      .string()
+      .optional()
+      .describe('Path to a cql-options file. Defaults to <IG root>/input/cql/cql-options.json.'),
+    rootDir: z
+      .string()
+      .optional()
+      .describe(
+        'IG project root (where the LS finds ig.ini and loads IG packages). Defaults to the IG root of cqlFile; none outside an IG.',
+      ),
+    libraryVersion: z.string().optional(),
+    modelUri: z
+      .string()
+      .optional()
+      .describe(
+        'Filesystem path to a directory of FHIR resources (IgStandardRepository root). ' +
           'When set, resources in that directory are loaded for retrieval; omit for compile-only runs.',
-      },
-      modelName: {
-        type: 'string',
-        description: 'Model identifier sent to the LS (defaults to "FHIR").',
-        default: 'FHIR',
-      },
-    },
-    required: ['cqlFile'],
-    additionalProperties: false,
+      ),
+    modelName: z.string().default('FHIR').describe('Model identifier sent to the LS (defaults to "FHIR").'),
   },
   handler: async (_ctx, args) => {
-    const missingFile = missing(args, 'cqlFile');
-    if (missingFile) {
-      throw new Error(missingFile);
-    }
-    const typeError =
-      expectString(args, 'cqlFile') ??
-      expectString(args, 'fhirVersion') ??
-      expectString(args, 'terminologyUri') ??
-      expectString(args, 'optionsPath') ??
-      expectString(args, 'rootDir') ??
-      expectString(args, 'modelUri') ??
-      expectString(args, 'modelName');
-    if (typeError) {
-      throw new Error(typeError);
-    }
-
     const cqlFile = path.resolve(args.cqlFile as string);
     if (!fs.existsSync(cqlFile)) {
       throw new Error(`CQL file not found: ${cqlFile}`);

@@ -1,6 +1,7 @@
 import type { DapSession, DebugLaunchArgs, StepGranularity } from '../dap/dapSession.js';
 import { GET_VERSION_INFO } from '../lsp/lspCommands.js';
-import { missing } from './defs.js';
+import { z } from 'zod';
+import { cqlParameterSchema } from './schemas.js';
 import type { McpContext, Tool } from './defs.js';
 
 /**
@@ -50,6 +51,25 @@ function extractString(args: Record<string, unknown>, key: string): string | und
   return v;
 }
 
+/**
+ * `cql_debug_start.parameters` accepts the documented `[{ name, type, value }]` form (as the other
+ * tools take) and the older `{ name: value }` object; both become the `{ name: value }` object the
+ * DAP launch request carries (ADR-0004 §2.2).
+ */
+export function normalizeParameters(raw: unknown): Record<string, unknown> | undefined {
+  if (Array.isArray(raw)) {
+    const out: Record<string, unknown> = {};
+    for (const p of raw as Array<{ name: string; value: unknown }>) {
+      out[p.name] = p.value;
+    }
+    return out;
+  }
+  if (raw && typeof raw === 'object') {
+    return raw as Record<string, unknown>;
+  }
+  return undefined;
+}
+
 function extractLaunchArgs(args: Record<string, unknown>): DebugLaunchArgs {
   if (typeof args.cqlFile !== 'string') {
     throw new Error('Missing required argument: cqlFile');
@@ -72,9 +92,8 @@ function extractLaunchArgs(args: Record<string, unknown>): DebugLaunchArgs {
     throw new Error(sg.error);
   }
   if (sg.value) out.stepGranularity = sg.value;
-  if (args.parameters && typeof args.parameters === 'object') {
-    out.parameters = args.parameters as Record<string, unknown>;
-  }
+  const parameters = normalizeParameters(args.parameters);
+  if (parameters) out.parameters = parameters;
   if (Array.isArray(args.breakpoints)) {
     out.breakpoints = args.breakpoints.filter(
       (n): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0,
@@ -101,29 +120,27 @@ export function buildDebugTools(session: DapSession): Tool[] {
         'cql_execute; explicit arguments override. Without rootDir an IG library fails to compile and the ' +
         'session terminates without stopping.',
       inputSchema: {
-        type: 'object',
-        properties: {
-          cqlFile: { type: 'string', description: 'Absolute path to the .cql file' },
-          fhirVersion: { type: 'string', description: 'FHIR version (default R4)' },
-          testCaseName: { type: 'string', description: 'MADIE bundle name to run' },
-          testCaseDir: { type: 'string', description: 'Path to MADIE test-case bundle directory' },
-          terminologyUri: { type: 'string' },
-          rootDir: { type: 'string' },
-          optionsPath: { type: 'string' },
-          stepGranularity: {
-            type: 'string',
-            enum: ['ast', 'cql'],
-            description: 'AST-level stepping when "ast", CQL-line-level otherwise (default "cql")',
-          },
-          parameters: { type: 'object', description: 'CQL parameter values keyed by name' },
-          breakpoints: {
-            type: 'array',
-            items: { type: 'integer' },
-            description: '1-indexed line numbers to set on cqlFile before launch',
-          },
-        },
-        required: ['cqlFile'],
-        additionalProperties: false,
+        cqlFile: z.string().min(1).describe('Absolute path to the .cql file'),
+        fhirVersion: z.string().optional().describe('FHIR version (default R4)'),
+        testCaseName: z.string().optional().describe('MADIE bundle name to run'),
+        testCaseDir: z.string().optional().describe('Path to MADIE test-case bundle directory'),
+        terminologyUri: z.string().optional(),
+        rootDir: z.string().optional(),
+        optionsPath: z.string().optional(),
+        stepGranularity: z
+          .enum(['ast', 'cql'])
+          .optional()
+          .describe('AST-level stepping when "ast", CQL-line-level otherwise (default "cql")'),
+        parameters: z
+          .union([z.array(cqlParameterSchema), z.record(z.string(), z.unknown())])
+          .optional()
+          .describe(
+            'CQL parameter values: an array of { name, type, value } (preferred, as for cql_execute), or an object keyed by name',
+          ),
+        breakpoints: z
+          .array(z.number().int())
+          .optional()
+          .describe('1-indexed line numbers to set on cqlFile before launch'),
       },
       handler: async (ctx, args) => {
         const launchArgs = extractLaunchArgs(args);
@@ -141,21 +158,10 @@ export function buildDebugTools(session: DapSession): Tool[] {
         'other lines; the LS marks them unverified later (BreakpointManager.updateBreakpointLineVerification), ' +
         'and a resume that then terminates without stopping lists them in unverifiedBreakpoints.',
       inputSchema: {
-        type: 'object',
-        properties: {
-          cqlFile: { type: 'string', description: 'Absolute path to the .cql file' },
-          lines: {
-            type: 'array',
-            items: { type: 'integer' },
-            description: '1-indexed line numbers',
-          },
-        },
-        required: ['cqlFile', 'lines'],
-        additionalProperties: false,
+        cqlFile: z.string().min(1).describe('Absolute path to the .cql file'),
+        lines: z.array(z.number().int().positive()).min(1).describe('1-indexed line numbers'),
       },
       handler: async (_ctx, args) => {
-        if (missing(args, 'cqlFile')) throw new Error(missing(args, 'cqlFile')!);
-        if (missing(args, 'lines')) throw new Error(missing(args, 'lines')!);
         const lines = (args.lines as unknown[])
           .filter((n): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0);
         const breakpoints = await session.setBreakpoints(String(args.cqlFile), lines);
@@ -173,15 +179,8 @@ export function buildDebugTools(session: DapSession): Tool[] {
         '(Error entries from re-running the library with the launch settings); with no breakpoints set the ' +
         'note is "terminated (no breakpoints set)".',
       inputSchema: {
-        type: 'object',
-        properties: {
-          threadId: { type: 'integer', default: 1 },
-          timeoutMs: {
-            type: 'integer',
-            description: 'Override the bounded resume wait (default 30000)',
-          },
-        },
-        additionalProperties: false,
+        threadId: z.number().int().default(1),
+        timeoutMs: z.number().int().optional().describe('Override the bounded resume wait (default 30000)'),
       },
       handler: async (_ctx, args) => {
         const threadId = typeof args.threadId === 'number' ? args.threadId : 1;
@@ -193,12 +192,8 @@ export function buildDebugTools(session: DapSession): Tool[] {
       name: 'cql_debug_next',
       description: 'Step over the current statement. Same blocked-until-stop semantics, and same terminated result, as continue.',
       inputSchema: {
-        type: 'object',
-        properties: {
-          threadId: { type: 'integer', default: 1 },
-          timeoutMs: { type: 'integer' },
-        },
-        additionalProperties: false,
+        threadId: z.number().int().default(1),
+        timeoutMs: z.number().int().optional(),
       },
       handler: async (_ctx, args) => {
         const threadId = typeof args.threadId === 'number' ? args.threadId : 1;
@@ -210,12 +205,8 @@ export function buildDebugTools(session: DapSession): Tool[] {
       name: 'cql_debug_step_in',
       description: 'Step into the current call. Same blocked-until-stop semantics, and same terminated result, as continue.',
       inputSchema: {
-        type: 'object',
-        properties: {
-          threadId: { type: 'integer', default: 1 },
-          timeoutMs: { type: 'integer' },
-        },
-        additionalProperties: false,
+        threadId: z.number().int().default(1),
+        timeoutMs: z.number().int().optional(),
       },
       handler: async (_ctx, args) => {
         const threadId = typeof args.threadId === 'number' ? args.threadId : 1;
@@ -227,12 +218,8 @@ export function buildDebugTools(session: DapSession): Tool[] {
       name: 'cql_debug_step_out',
       description: 'Step out of the current function. Same blocked-until-stop semantics, and same terminated result, as continue.',
       inputSchema: {
-        type: 'object',
-        properties: {
-          threadId: { type: 'integer', default: 1 },
-          timeoutMs: { type: 'integer' },
-        },
-        additionalProperties: false,
+        threadId: z.number().int().default(1),
+        timeoutMs: z.number().int().optional(),
       },
       handler: async (_ctx, args) => {
         const threadId = typeof args.threadId === 'number' ? args.threadId : 1;
@@ -247,12 +234,8 @@ export function buildDebugTools(session: DapSession): Tool[] {
         'into its variable list (flattened one level). If variablesReference is given, only that ' +
         "subtree is fetched. Exactly one of frameId / variablesReference should be supplied.",
       inputSchema: {
-        type: 'object',
-        properties: {
-          frameId: { type: 'integer' },
-          variablesReference: { type: 'integer' },
-        },
-        additionalProperties: false,
+        frameId: z.number().int().optional(),
+        variablesReference: z.number().int().optional(),
       },
       handler: async (_ctx, args) => {
         if (typeof args.variablesReference === 'number') {
@@ -277,16 +260,10 @@ export function buildDebugTools(session: DapSession): Tool[] {
         'Evaluate a CQL expression in the current frame (frameId) or in a watch/hover context ' +
         '(no frameId). Returns the same shape DAP `evaluate` returns: result, type, variablesReference.',
       inputSchema: {
-        type: 'object',
-        properties: {
-          expression: { type: 'string' },
-          frameId: { type: 'integer' },
-        },
-        required: ['expression'],
-        additionalProperties: false,
+        expression: z.string().min(1),
+        frameId: z.number().int().optional(),
       },
       handler: async (_ctx, args) => {
-        if (missing(args, 'expression')) throw new Error(missing(args, 'expression')!);
         const frameId = typeof args.frameId === 'number' ? args.frameId : undefined;
         return session.evaluate(String(args.expression), frameId);
       },
@@ -296,7 +273,7 @@ export function buildDebugTools(session: DapSession): Tool[] {
       description:
         'Disconnect the active DAP session and close the TCP socket. A no-op if the session has ' +
         'already ended (the debuggee terminated or the language server went away).',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      inputSchema: {},
       handler: async () => {
         await session.stop();
         return { active: false };

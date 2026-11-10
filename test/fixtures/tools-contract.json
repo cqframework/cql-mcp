@@ -1,0 +1,544 @@
+[
+  {
+    "name": "cql_get_status",
+    "description": "Report JVM/Language Server readiness, jar path and source, java version, workspace root, and the language server version string. The first call starts resolving Java and the language-server jar in the background (a first run may download the jar); until it is ready, `runtime.state` is `resolving` with the current `phase` and download progress.",
+    "required": [],
+    "args": {}
+  },
+  {
+    "name": "cql_execute",
+    "description": "Execute a single CQL library against the language server and return expression results. Compiler/runtime errors are returned as diagnostics with success=false (not a transport error). Provide contextValues to run one library request per patient/context value. For a file in the IG Publisher default layout (<root>/input/cql/*.cql with an ig.ini at <root> or above), rootDir, terminologyUri and optionsPath default to <root> and the default-layout paths <root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json; explicit arguments override. Other files get no rootDir. Patient data is only read when modelUri is set.",
+    "required": [
+      "cqlFile"
+    ],
+    "args": {
+      "contextValues": {
+        "type": "array",
+        "description": "Patient/context values; one library request is built per value",
+        "items": {
+          "type": "string"
+        }
+      },
+      "cqlFile": {
+        "type": "string",
+        "description": "Path to the .cql file to execute",
+        "minLength": 1
+      },
+      "fhirVersion": {
+        "type": "string",
+        "description": "FHIR version, e.g. R4 (default R4)",
+        "default": "R4"
+      },
+      "libraryVersion": {
+        "type": "string"
+      },
+      "modelName": {
+        "type": "string",
+        "description": "Model identifier sent to the LS (defaults to \"FHIR\").",
+        "default": "FHIR"
+      },
+      "modelUri": {
+        "type": "string",
+        "description": "Filesystem path to a directory of FHIR resources (IgStandardRepository root). When set, resources in that directory are loaded for retrieval; omit for compile-only runs."
+      },
+      "optionsPath": {
+        "type": "string",
+        "description": "Path to a cql-options file. Defaults to <IG root>/input/cql/cql-options.json."
+      },
+      "parameters": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ]
+        }
+      },
+      "rootDir": {
+        "type": "string",
+        "description": "IG project root (where the LS finds ig.ini and loads IG packages). Defaults to the IG root of cqlFile; none outside an IG."
+      },
+      "terminologyUri": {
+        "type": "string",
+        "description": "Path to a terminology directory/file. Defaults to <IG root>/input/vocabulary/valueset."
+      }
+    }
+  },
+  {
+    "name": "cql_view_elm",
+    "description": "Return the ELM representation of a CQL library as the language server serializes it. elmType is 'xml', 'json', or 'ast'.",
+    "required": [
+      "cqlFile"
+    ],
+    "args": {
+      "cqlFile": {
+        "type": "string",
+        "description": "Path to the .cql file",
+        "minLength": 1
+      },
+      "elmType": {
+        "type": "string",
+        "enum": [
+          "xml",
+          "json",
+          "ast"
+        ],
+        "default": "xml"
+      }
+    }
+  },
+  {
+    "name": "cql_get_signatures",
+    "description": "Extracts all expressions (defines), functions, parameters, value sets, and code systems from a CQL file along with their exact compiled return types and parameter types.",
+    "required": [
+      "cqlFile"
+    ],
+    "args": {
+      "cqlFile": {
+        "type": "string",
+        "description": "Path to the .cql file",
+        "minLength": 1
+      },
+      "includePrivate": {
+        "type": "boolean",
+        "description": "Whether to include private definitions and functions. Defaults to false.",
+        "default": false
+      }
+    }
+  },
+  {
+    "name": "cql_resolve_includes",
+    "description": "Resolves included CQL libraries referenced by a CQL file, locating their source files on disk and extracting their public definitions, functions, and terminology bindings.",
+    "required": [
+      "cqlFile"
+    ],
+    "args": {
+      "alias": {
+        "type": "string",
+        "description": "Optional alias (localIdentifier) to resolve specifically (e.g. \"Global\" or \"FHIRHelpers\"). If omitted, all included libraries are resolved."
+      },
+      "cqlFile": {
+        "type": "string",
+        "description": "Path to the primary .cql file",
+        "minLength": 1
+      },
+      "includeSignatures": {
+        "type": "boolean",
+        "description": "Whether to parse and return public defines, functions, and value sets for each included library. Defaults to true.",
+        "default": true
+      }
+    }
+  },
+  {
+    "name": "cql_validate",
+    "description": "Validates a CQL file or in-memory CQL content for syntax and type errors without executing patient bundles, returning compiler diagnostics and translation errors.",
+    "required": [
+      "cqlFile"
+    ],
+    "args": {
+      "content": {
+        "type": "string",
+        "description": "Optional in-memory CQL content to validate without saving to disk. Overrides file contents on disk."
+      },
+      "cqlFile": {
+        "type": "string",
+        "description": "Path to the .cql file",
+        "minLength": 1
+      },
+      "quiescenceMs": {
+        "type": "number",
+        "description": "Milliseconds of quiet time after receiving diagnostics before settling. Defaults to 100.",
+        "default": 100
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Maximum milliseconds to wait for compiler diagnostics. Defaults to 2000.",
+        "default": 2000
+      }
+    }
+  },
+  {
+    "name": "cql_debug_start",
+    "description": "Start a DAP debug session for a CQL library. Chains LSP `startDebugSession` → TCP connect → DAP `initialize`/`launch`/`configurationDone` in a single call so the LS 10-second accept window is not missed. Optionally pass `breakpoints` to set them before launch (via the LS pre-launch breakpoints fallback), avoiding a separate cql_debug_set_breakpoints round-trip. Enforces a single active session: call cql_debug_stop first if one is already running. Pass cqlFile as the path to a .cql file (the tool internally computes both DAP-form and executeCql-form URIs). For a file in the IG Publisher default layout (<root>/input/cql/*.cql with an ig.ini at <root> or above), rootDir, terminologyUri and optionsPath default to <root> and the default-layout paths <root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json (when they exist), as for cql_execute; explicit arguments override. Without rootDir an IG library fails to compile and the session terminates without stopping.",
+    "required": [
+      "cqlFile"
+    ],
+    "args": {
+      "breakpoints": {
+        "type": "array",
+        "description": "1-indexed line numbers to set on cqlFile before launch",
+        "items": {
+          "type": "integer"
+        }
+      },
+      "cqlFile": {
+        "type": "string",
+        "description": "Absolute path to the .cql file",
+        "minLength": 1
+      },
+      "fhirVersion": {
+        "type": "string",
+        "description": "FHIR version (default R4)"
+      },
+      "optionsPath": {
+        "type": "string"
+      },
+      "parameters": {
+        "description": "CQL parameter values: an array of { name, type, value } (preferred, as for cql_execute), or an object keyed by name",
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "value"
+              ]
+            }
+          },
+          {
+            "type": "object"
+          }
+        ]
+      },
+      "rootDir": {
+        "type": "string"
+      },
+      "stepGranularity": {
+        "type": "string",
+        "description": "AST-level stepping when \"ast\", CQL-line-level otherwise (default \"cql\")",
+        "enum": [
+          "ast",
+          "cql"
+        ]
+      },
+      "terminologyUri": {
+        "type": "string"
+      },
+      "testCaseDir": {
+        "type": "string",
+        "description": "Path to MADIE test-case bundle directory"
+      },
+      "testCaseName": {
+        "type": "string",
+        "description": "MADIE bundle name to run"
+      }
+    }
+  },
+  {
+    "name": "cql_debug_set_breakpoints",
+    "description": "Set breakpoints (line numbers) in a CQL file. Put each breakpoint on an expression line, not on the `define \"X\":` line: the LS only stops on expression and expression-term start lines (CqlStepPositionCollector.collectBreakpointableLines). The response may still say verified=true for other lines; the LS marks them unverified later (BreakpointManager.updateBreakpointLineVerification), and a resume that then terminates without stopping lists them in unverifiedBreakpoints.",
+    "required": [
+      "cqlFile",
+      "lines"
+    ],
+    "args": {
+      "cqlFile": {
+        "type": "string",
+        "description": "Absolute path to the .cql file",
+        "minLength": 1
+      },
+      "lines": {
+        "type": "array",
+        "description": "1-indexed line numbers",
+        "minItems": 1,
+        "items": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "cql_debug_continue",
+    "description": "Resume execution; blocks until the debuggee stops, terminates, or the optional timeoutMs elapses. Timeout is NOT an error: the session stays alive and paused. When the debuggee terminates (or the language server goes away) the session ends by itself, so cql_debug_start can be called again without cql_debug_stop. If it terminates without ever stopping although breakpoints were set, the result has a note, unverifiedBreakpoints, and errors (Error entries from re-running the library with the launch settings); with no breakpoints set the note is \"terminated (no breakpoints set)\".",
+    "required": [],
+    "args": {
+      "threadId": {
+        "type": "integer",
+        "default": 1
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "description": "Override the bounded resume wait (default 30000)"
+      }
+    }
+  },
+  {
+    "name": "cql_debug_next",
+    "description": "Step over the current statement. Same blocked-until-stop semantics, and same terminated result, as continue.",
+    "required": [],
+    "args": {
+      "threadId": {
+        "type": "integer",
+        "default": 1
+      },
+      "timeoutMs": {
+        "type": "integer"
+      }
+    }
+  },
+  {
+    "name": "cql_debug_step_in",
+    "description": "Step into the current call. Same blocked-until-stop semantics, and same terminated result, as continue.",
+    "required": [],
+    "args": {
+      "threadId": {
+        "type": "integer",
+        "default": 1
+      },
+      "timeoutMs": {
+        "type": "integer"
+      }
+    }
+  },
+  {
+    "name": "cql_debug_step_out",
+    "description": "Step out of the current function. Same blocked-until-stop semantics, and same terminated result, as continue.",
+    "required": [],
+    "args": {
+      "threadId": {
+        "type": "integer",
+        "default": 1
+      },
+      "timeoutMs": {
+        "type": "integer"
+      }
+    }
+  },
+  {
+    "name": "cql_debug_get_variables",
+    "description": "Fetch variables. If frameId is given, scopes are enumerated and each scope is expanded into its variable list (flattened one level). If variablesReference is given, only that subtree is fetched. Exactly one of frameId / variablesReference should be supplied.",
+    "required": [],
+    "args": {
+      "frameId": {
+        "type": "integer"
+      },
+      "variablesReference": {
+        "type": "integer"
+      }
+    }
+  },
+  {
+    "name": "cql_debug_evaluate",
+    "description": "Evaluate a CQL expression in the current frame (frameId) or in a watch/hover context (no frameId). Returns the same shape DAP `evaluate` returns: result, type, variablesReference.",
+    "required": [
+      "expression"
+    ],
+    "args": {
+      "expression": {
+        "type": "string",
+        "minLength": 1
+      },
+      "frameId": {
+        "type": "integer"
+      }
+    }
+  },
+  {
+    "name": "cql_debug_stop",
+    "description": "Disconnect the active DAP session and close the TCP socket. A no-op if the session has already ended (the debuggee terminated or the language server went away).",
+    "required": [],
+    "args": {}
+  },
+  {
+    "name": "cql_test_run_file",
+    "description": "Run a single CQL file against one or more context values (one library request per value), persist the result, and update the latest/previous pointer for the suite. Returns the persisted RunRecord (counts + per-case results). Patient data is only read when modelUri is set (use cql_test_run_suite for test-case folders). For a cqlFile in the IG Publisher default layout (<root>/input/cql/*.cql with an ig.ini at <root> or above), rootDir, terminologyUri and optionsPath default to <root> and the default-layout paths <root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json; explicit arguments override. Case status: passed = evaluated with no Error entries; failed = the language server returned Error entries (e.g. compile errors); errored = the language server crashed on this case; skipped = not run after a crash. Status is NOT a comparison against expected results (MeasureReport / TestCaseResult).",
+    "required": [
+      "cqlFile"
+    ],
+    "args": {
+      "contextValues": {
+        "type": "array",
+        "description": "Patient/context values to run against (one library request per value)",
+        "items": {
+          "type": "string"
+        }
+      },
+      "cqlFile": {
+        "type": "string",
+        "description": "Path to the .cql file to execute",
+        "minLength": 1
+      },
+      "fhirVersion": {
+        "type": "string",
+        "description": "FHIR version, e.g. R4 (default R4)",
+        "default": "R4"
+      },
+      "libraryVersion": {
+        "type": "string"
+      },
+      "modelUri": {
+        "type": "string",
+        "description": "Directory of FHIR resources (e.g. one test-case folder) to evaluate against."
+      },
+      "optionsPath": {
+        "type": "string"
+      },
+      "parameters": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ]
+        }
+      },
+      "rootDir": {
+        "type": "string"
+      },
+      "suiteName": {
+        "type": "string",
+        "description": "Logical suite name. Defaults to the CQL file stem. Used to group runs in listings and diffs."
+      },
+      "terminologyUri": {
+        "type": "string"
+      },
+      "workspaceRoot": {
+        "type": "string",
+        "description": "Workspace root under which .cql-debug/test-runs is stored. Defaults to MCP CWD."
+      }
+    }
+  },
+  {
+    "name": "cql_test_run_suite",
+    "description": "Discover test cases under `<suiteRoot>/<suiteName>/<patient-uuid>/` (Layout A), merge per-case parameters from a config.jsonc file (with caller-supplied exclusions unioned in), run each case, persist the result, and update the latest/previous pointer. The `shared` directory is always excluded. Each case is evaluated against its own folder's FHIR resources. For a cqlFile in the IG Publisher default layout (<root>/input/cql/*.cql with an ig.ini at <root> or above), rootDir, terminologyUri and optionsPath default to <root> and the default-layout paths <root>/input/vocabulary/valueset and <root>/input/cql/cql-options.json; explicit arguments override. Case status: passed = evaluated with no Error entries; failed = the language server returned Error entries (e.g. compile errors); errored = the language server crashed on this case; skipped = not run after a crash. Status is NOT a comparison against expected results (MeasureReport / TestCaseResult).",
+    "required": [
+      "cqlFile",
+      "suiteName",
+      "suiteRoot"
+    ],
+    "args": {
+      "configPath": {
+        "type": "string",
+        "description": "Optional path to a .jsonc config file. Loads .jsonc preferentially over .json if both exist at the same path."
+      },
+      "cqlFile": {
+        "type": "string",
+        "description": "Path to the .cql library file",
+        "minLength": 1
+      },
+      "excludeTestCases": {
+        "type": "array",
+        "description": "Test case (subdirectory) names to exclude; unioned with config.testCasesToExclude.",
+        "items": {
+          "type": "string"
+        }
+      },
+      "fhirVersion": {
+        "type": "string",
+        "description": "FHIR version (default R4)",
+        "default": "R4"
+      },
+      "optionsPath": {
+        "type": "string",
+        "description": "cql-options file. Defaults to <IG root>/input/cql/cql-options.json."
+      },
+      "rootDir": {
+        "type": "string",
+        "description": "IG project root. Defaults to the IG root of cqlFile."
+      },
+      "suiteName": {
+        "type": "string",
+        "description": "Suite (library) name — selects the subdirectory under suiteRoot.",
+        "minLength": 1
+      },
+      "suiteRoot": {
+        "type": "string",
+        "description": "Parent directory containing one subdirectory per library/suite (Layout A: each subdirectory contains test-case dirs).",
+        "minLength": 1
+      },
+      "terminologyUri": {
+        "type": "string",
+        "description": "Terminology directory. Defaults to <IG root>/input/vocabulary/valueset."
+      },
+      "workspaceRoot": {
+        "type": "string",
+        "description": "Workspace root under which .cql-debug/test-runs is stored. Defaults to MCP CWD."
+      }
+    }
+  },
+  {
+    "name": "cql_test_list_runs",
+    "description": "List previously persisted test runs (newest-first). Optionally filter by suite and limit the count.",
+    "required": [],
+    "args": {
+      "limit": {
+        "type": "integer",
+        "description": "Maximum number of runs to return",
+        "minimum": 1,
+        "maximum": 1000
+      },
+      "suiteName": {
+        "type": "string",
+        "description": "Suite (library) name. Filters to runs of this suite only."
+      },
+      "workspaceRoot": {
+        "type": "string",
+        "description": "Workspace root under which .cql-debug/test-runs is stored. Defaults to MCP CWD."
+      }
+    }
+  },
+  {
+    "name": "cql_test_diff",
+    "description": "Diff two persisted runs for the same suite. Either provide two hash-or-timestamp strings via runA/runB, or pass \"latest\"/\"previous\" to use the pointer files for the suite. If no previous run has been recorded, returns a no_previous_run status (not an error).",
+    "required": [
+      "runA",
+      "runB",
+      "suiteName"
+    ],
+    "args": {
+      "runA": {
+        "type": "string",
+        "description": "Hash prefix (8+ chars) or timestamp (or timestamp prefix) of the first run, as listed by cql_test_list_runs (ISO form with \":\" and \".\" also accepted, any case). Use \"latest\" or \"previous\" to use pointer files."
+      },
+      "runB": {
+        "type": "string",
+        "description": "Hash prefix (8+ chars) or timestamp (or timestamp prefix) of the second run, as listed by cql_test_list_runs (ISO form with \":\" and \".\" also accepted, any case). Use \"latest\" or \"previous\" to use pointer files."
+      },
+      "suiteName": {
+        "type": "string",
+        "description": "Suite (library) name. Required. Suite whose runs should be diffed."
+      },
+      "workspaceRoot": {
+        "type": "string",
+        "description": "Workspace root under which .cql-debug/test-runs is stored. Defaults to MCP CWD."
+      }
+    }
+  }
+]

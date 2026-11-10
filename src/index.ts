@@ -1,21 +1,13 @@
 #!/usr/bin/env node
-import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { CqlLsProcess, LanguageServerCrashedError } from './jvm/cqlLsProcess.js';
+import { CqlLsProcess } from './jvm/cqlLsProcess.js';
 import { RuntimeResolver } from './jvm/runtimeResolver.js';
 import { DapSession } from './dap/dapSession.js';
 import { log, configureLog } from './log.js';
 import type { McpContext, Tool } from './tools/defs.js';
-import { executeCqlTool } from './tools/executeCqlTool.js';
-import { getStatusTool } from './tools/statusTool.js';
-import { viewElmTool } from './tools/viewElmTool.js';
-import { signaturesTool } from './tools/signaturesTool.js';
-import { resolveIncludesTool } from './tools/resolveIncludesTool.js';
-import { validateTool } from './tools/validateTool.js';
-import { buildDebugTools } from './tools/debugTools.js';
-import { buildTestPipelineTools } from './tools/testPipelineTools.js';
+import { buildAllTools } from './tools/allTools.js';
+import { registerTools } from './tools/register.js';
 import { SERVER_NAME, SERVER_VERSION } from './version.js';
 import { resolveWorkspaceRoot } from './workspace/workspaceConfig.js';
 
@@ -24,14 +16,6 @@ const SHUTDOWN_WATCHDOG_MS = 15_000;
 interface ServerHandles {
   process: CqlLsProcess;
   context: McpContext;
-}
-
-function requireTool(tools: Tool[], name: string): Tool {
-  const tool = tools.find((t) => t.name === name);
-  if (!tool) {
-    throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-  }
-  return tool;
 }
 
 async function start(): Promise<void> {
@@ -58,52 +42,10 @@ async function start(): Promise<void> {
     workspaceRoot,
   };
 
-  const tools: Tool[] = [
-    getStatusTool,
-    executeCqlTool,
-    viewElmTool,
-    signaturesTool,
-    resolveIncludesTool,
-    validateTool,
-    ...buildDebugTools(debugSession),
-    ...buildTestPipelineTools(),
-  ];
+  const tools: Tool[] = buildAllTools(debugSession);
 
-  const server = new Server(
-    { name: SERVER_NAME, version: SERVER_VERSION },
-    { capabilities: { tools: {} } },
-  );
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
-  }));
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const tool = requireTool(tools, request.params.name);
-    const args = (request.params.arguments ?? {}) as Record<string, unknown>;
-    log.info(`Calling tool ${tool.name}`, safeLogArgs(args));
-    try {
-      const result = await tool.handler(context, args);
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-      };
-    } catch (err) {
-      log.error(`Tool ${tool.name} failed`, { message: err instanceof Error ? err.message : err });
-      if (err instanceof McpError) {
-        throw err;
-      }
-      if (err instanceof LanguageServerCrashedError) {
-        throw new McpError(
-          ErrorCode.InternalError,
-          `language_server_crashed: ${JSON.stringify(err.crash)}`,
-        );
-      }
-      throw new McpError(
-        ErrorCode.InternalError,
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-  });
+  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+  registerTools(server, tools, context);
 
   const handles = { lsProcess, debugSession };
 
@@ -144,18 +86,6 @@ async function start(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   log.info(`${SERVER_NAME} ${SERVER_VERSION} ready (workspace=${workspaceRoot}; Java and the language-server jar are resolved on first use)`);
-}
-
-function safeLogArgs(args: Record<string, unknown>): Record<string, unknown> {
-  const clone: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(args)) {
-    if (typeof value === 'string' && value.length > 200) {
-      clone[key] = value.slice(0, 200) + '...';
-    } else {
-      clone[key] = value;
-    }
-  }
-  return clone;
 }
 
 start().catch((err) => {

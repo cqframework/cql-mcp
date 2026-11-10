@@ -5,11 +5,7 @@ export const getStatusTool: Tool = {
   name: 'cql_get_status',
   description:
     'Report JVM/Language Server readiness, jar path and source, java version, workspace root, and the language server version string. The first call starts resolving Java and the language-server jar in the background (a first run may download the jar); until it is ready, `runtime.state` is `resolving` with the current `phase` and download progress.',
-  inputSchema: {
-    type: 'object',
-    properties: {},
-    additionalProperties: false,
-  },
+  inputSchema: {},
   handler: async (ctx) => {
     // Starting resolution does not block; the status below reports its progress.
     ctx.runtime.start();

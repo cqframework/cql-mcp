@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { VIEW_ELM } from '../lsp/lspCommands.js';
 import { openCqlFile } from './executeCqlTool.js';
-import { missing } from './defs.js';
+import { z } from 'zod';
 import type { Tool, McpContext } from './defs.js';
 import { pathToUri } from '../workspace/paths.js';
 import { extractSignatures, ExtractedSignatures } from './extractSignatures.js';
@@ -13,32 +13,21 @@ export const resolveIncludesTool: Tool = {
   description:
     'Resolves included CQL libraries referenced by a CQL file, locating their source files on disk and extracting their public definitions, functions, and terminology bindings.',
   inputSchema: {
-    type: 'object',
-    properties: {
-      cqlFile: {
-        type: 'string',
-        description: 'Path to the primary .cql file',
-      },
-      alias: {
-        type: 'string',
-        description:
-          'Optional alias (localIdentifier) to resolve specifically (e.g. "Global" or "FHIRHelpers"). If omitted, all included libraries are resolved.',
-      },
-      includeSignatures: {
-        type: 'boolean',
-        description:
-          'Whether to parse and return public defines, functions, and value sets for each included library. Defaults to true.',
-        default: true,
-      },
-    },
-    required: ['cqlFile'],
-    additionalProperties: false,
+    cqlFile: z.string().min(1).describe('Path to the primary .cql file'),
+    alias: z
+      .string()
+      .optional()
+      .describe(
+        'Optional alias (localIdentifier) to resolve specifically (e.g. "Global" or "FHIRHelpers"). If omitted, all included libraries are resolved.',
+      ),
+    includeSignatures: z
+      .boolean()
+      .default(true)
+      .describe(
+        'Whether to parse and return public defines, functions, and value sets for each included library. Defaults to true.',
+      ),
   },
   handler: async (ctx: McpContext, args: Record<string, unknown>) => {
-    const missingFile = missing(args, 'cqlFile');
-    if (missingFile) {
-      throw new Error(missingFile);
-    }
     const cqlFile = path.resolve(args.cqlFile as string);
     if (!fs.existsSync(cqlFile)) {
       throw new Error(`CQL file not found: ${cqlFile}`);
