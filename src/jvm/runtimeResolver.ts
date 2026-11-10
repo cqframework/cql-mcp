@@ -23,11 +23,19 @@ export interface RuntimeStatus {
   javaVersion?: number;
   download?: { url: string; bytes: number; totalBytes?: number };
   error?: string;
+  /** ISO time before which a status-triggered start() will not retry after a failure. */
+  retryAt?: string;
 }
+
+/** Backoff between status-triggered retries after a failed resolution: 5 s, doubling, capped at 60 s. */
+export const RETRY_BACKOFF_INITIAL_MS = 5_000;
+export const RETRY_BACKOFF_MAX_MS = 60_000;
 
 export interface RuntimeResolverDeps {
   findJava?: () => JavaRuntime | null;
   resolveJar?: (options?: JarInstallOptions) => Promise<JarResolution>;
+  /** Clock in ms, injectable for tests. */
+  now?: () => number;
 }
 
 /** Removes any userinfo (user:password@) from a URL so it is safe to report. */
@@ -51,6 +59,8 @@ function lsVersionOf(jarPath: string): string | null {
  * Resolves the Java runtime and the language-server jar lazily and memoized, so the MCP server can
  * answer `initialize` before either is available (ADR-0001 §2.2). A failure is not cached: the
  * next resolve() retries, so network or configuration problems can be fixed without a restart.
+ * start() (triggered by every status poll) is rate-limited by an exponential backoff after a
+ * failure, so polling cannot hammer a failing proxy or mirror; resolve() always retries at once.
  */
 export class RuntimeResolver {
   private readonly findJava: () => JavaRuntime | null;
@@ -62,10 +72,14 @@ export class RuntimeResolver {
   private phase: 'java' | 'jar' | undefined;
   private download: RuntimeStatus['download'];
   private error: string | undefined;
+  private failures = 0;
+  private retryAt = 0;
+  private readonly now: () => number;
 
   constructor(deps: RuntimeResolverDeps = {}) {
     this.findJava = deps.findJava ?? (() => findJavaRuntime());
     this.resolveJar = deps.resolveJar ?? ensureJar;
+    this.now = deps.now ?? Date.now;
   }
 
   resolve(): Promise<ResolvedRuntime> {
@@ -80,6 +94,8 @@ export class RuntimeResolver {
       this.inflight = this.doResolve().then(
         (r) => {
           this.result = r;
+          this.failures = 0;
+          this.retryAt = 0;
           this.state = 'ready';
           this.phase = undefined;
           this.download = undefined;
@@ -92,6 +108,9 @@ export class RuntimeResolver {
           this.phase = undefined;
           this.download = undefined;
           this.error = err instanceof Error ? err.message : String(err);
+          this.failures += 1;
+          this.retryAt =
+            this.now() + Math.min(RETRY_BACKOFF_INITIAL_MS * 2 ** (this.failures - 1), RETRY_BACKOFF_MAX_MS);
           this.inflight = null;
           throw err;
         },
@@ -100,8 +119,14 @@ export class RuntimeResolver {
     return this.inflight;
   }
 
-  /** Fire-and-forget resolve() that never causes an unhandled rejection. */
+  /**
+   * Fire-and-forget resolve() that never causes an unhandled rejection. After a failure it does
+   * nothing until the backoff has passed; use resolve() to retry immediately.
+   */
   start(): void {
+    if (this.state === 'failed' && !this.inflight && this.now() < this.retryAt) {
+      return;
+    }
     this.resolve().catch((err: unknown) => {
       log.warn('Runtime resolution failed', { message: err instanceof Error ? err.message : String(err) });
     });
@@ -118,6 +143,7 @@ export class RuntimeResolver {
     }
     if (this.download) s.download = this.download;
     if (this.error) s.error = this.error;
+    if (this.state === 'failed') s.retryAt = new Date(this.retryAt).toISOString();
     return s;
   }
 

@@ -1,0 +1,16 @@
+{
+  "maven": {
+    "repositories": [
+      {
+        "id": "releases",
+        "visibility": "PRIVATE",
+        "redeployment": false,
+        "preserveSnapshots": false,
+        "storageProvider": { "type": "fs", "quota": "100%", "mount": "", "maxResourceLockLifetimeInSeconds": 60 },
+        "storagePolicy": "PRIORITIZE_UPSTREAM_METADATA",
+        "metadataMaxAge": 0,
+        "proxied": []
+      }
+    ]
+  }
+}

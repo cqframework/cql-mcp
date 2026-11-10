@@ -46,7 +46,8 @@
     "test:net": "npm run pretest && mocha \"dist/test/net/**/*.test.js\" --timeout 30000",
     "test:integration": "npm run pretest && mocha \"dist/test/integration/**/*.test.js\" --timeout 180000",
     "smoke": "bash scripts/smoke.sh \"$PWD\" \"$PWD\" \"${CQL_LS_JAR_PATH:?CQL_LS_JAR_PATH must be set}\"",
-    "prepack": "npm run compile"
+    "prepack": "npm run compile",
+    "test:e2e": "npm run compile && node test/e2e/restricted-network/orchestrate.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

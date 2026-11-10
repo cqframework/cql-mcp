@@ -1,0 +1,32 @@
+name: E2E (restricted network)
+
+# Layer 3: the packed tarball on a simulated corporate network (docker compose). Ubuntu only,
+# because GitHub's macOS and Windows runners cannot run Linux containers. Scenario B downloads
+# from the real Maven Central through the squid proxy.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  restricted-network:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Read the default LS version
+        id: ls
+        run: echo "version=$(sed -n "s/.*DEFAULT_CQL_LS_VERSION = '\([^']*\)'.*/\1/p" src/jvm/jarInstaller.ts)" >> "$GITHUB_OUTPUT"
+      - name: Cache the LS jar
+        uses: actions/cache@v4
+        with:
+          path: test/e2e/restricted-network/.work/jar-cache
+          key: cql-ls-server-jar-${{ steps.ls.outputs.version }}
+      - run: npm run test:e2e

@@ -1,0 +1,81 @@
+# Layer 3 of the test strategy: the packed cql-mcp tarball on a simulated corporate network.
+# Driven by orchestrate.mjs (`npm run test:e2e`), which supplies every E2E_* variable.
+#
+#   corp: internal network, no internet egress. The client lives only here.
+#   edge: has egress. Only squid is attached, so scenario B is the one path to real Maven Central.
+name: cql-mcp-e2e
+
+networks:
+  corp:
+    internal: true
+  edge: {}
+
+volumes:
+  mitm-ca: {}
+
+services:
+  # Private Maven repo seeded with the real LS jar and its .sha1.
+  mirror:
+    image: dzikoysk/reposilite:3.5.20
+    environment:
+      REPOSILITE_OPTS: --token e2e:${E2E_MIRROR_TOKEN:?} --shared-config /config/shared.configuration.json
+    networks: [corp]
+    volumes:
+      - ./mirror/shared.configuration.json:/config/shared.configuration.json:ro
+      - ${E2E_SEED_DIR:?}:/app/data/repositories/releases
+
+  # The only route out: Basic auth, logs every request.
+  proxy:
+    image: ubuntu/squid:5.2-22.04_beta
+    networks: [corp, edge]
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf:ro
+      - ${E2E_PASSWD_FILE:?}:/etc/squid/passwd:ro
+    healthcheck:
+      test: ["CMD-SHELL", "squid -k check"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # TLS-intercepting proxy (Zscaler-style). Corp only: its addon answers repo1.maven.org from
+  # `mirror`, so scenario C never reaches the real Central.
+  tlsproxy:
+    image: mitmproxy/mitmproxy:11.0.2
+    command:
+      - sh
+      - -c
+      - mitmdump --set confdir=/home/mitmproxy/.mitmproxy --listen-port 8080 --set connection_strategy=lazy -s /addon/central_to_mirror.py 2>&1 | tee -a /logs/mitm.log
+    environment:
+      E2E_MIRROR_TOKEN: ${E2E_MIRROR_TOKEN:?}
+      E2E_MIRROR_USER: e2e
+      PYTHONUNBUFFERED: "1"
+    networks: [corp]
+    tmpfs:
+      - /logs:mode=1777
+    volumes:
+      - mitm-ca:/home/mitmproxy/.mitmproxy
+      - ./tlsproxy/central_to_mirror.py:/addon/central_to_mirror.py:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # Node 22 + Temurin 17 with the `npm pack` tarball installed globally. Run with
+  # `docker compose run --rm client node /e2e/run.mjs <scenario>`; each run uses an empty HOME.
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    networks: [corp]
+    depends_on:
+      tlsproxy:
+        condition: service_healthy
+    volumes:
+      - mitm-ca:/certs:ro
+    environment:
+      E2E_MIRROR_TOKEN: ${E2E_MIRROR_TOKEN:?}
+      E2E_PROXY_USER: ${E2E_PROXY_USER:?}
+      E2E_PROXY_PASSWORD: ${E2E_PROXY_PASSWORD:?}
+      E2E_LS_VERSION: ${E2E_LS_VERSION:?}
+    command: ["node", "/e2e/run.mjs", "A"]

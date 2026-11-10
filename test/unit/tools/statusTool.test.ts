@@ -79,19 +79,35 @@ describe('tools/statusTool', () => {
       workspaceRoot: '/workspace',
       activeDebugSession: false,
     });
-    expect(out.runtime).to.deep.equal({ state: 'ready', phase: null, download: null, error: null });
+    expect(out.runtime).to.deep.equal({ state: 'ready', phase: null, download: null, error: null, retryAt: null });
   });
 
-  it('reports a resolution failure without throwing, and retries on the next call', async () => {
-    const runtime = new RuntimeResolver({ findJava: () => null, resolveJar: async () => JAR });
+  it('reports a resolution failure without throwing, and does not retry inside the backoff window', async () => {
+    let now = 0;
+    let attempts = 0;
+    const runtime = new RuntimeResolver({
+      findJava: () => {
+        attempts += 1;
+        return null;
+      },
+      resolveJar: async () => JAR,
+      now: () => now,
+    });
     await runtime.resolve().catch(() => undefined);
-    expect(runtime.status().error).to.include('No Java >= 17 found');
-    // The call itself retries (start()), so it reports the new attempt rather than throwing.
+    expect(attempts).to.equal(1);
+    // Polling status right away reports the failure (with retryAt) instead of re-resolving.
     const out = (await getStatusTool.handler(ctx(runtime), {})) as Record<string, any>;
-    expect(out.runtime.state).to.equal('resolving');
+    expect(out.runtime.state).to.equal('failed');
+    expect(out.runtime.error).to.include('No Java >= 17 found');
+    expect(out.runtime.retryAt).to.equal(new Date(5_000).toISOString());
     expect(out.ready).to.equal(false);
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(runtime.status()).to.include({ state: 'failed' });
-    expect(runtime.status().error).to.include('No Java >= 17 found');
+    expect(attempts).to.equal(1);
+    // Once the window has passed, the next status call retries.
+    now = 5_000;
+    const retried = (await getStatusTool.handler(ctx(runtime), {})) as Record<string, any>;
+    expect(retried.runtime.state).to.equal('resolving');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(attempts).to.equal(2);
   });
 });

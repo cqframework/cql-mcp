@@ -52,6 +52,7 @@ npm run test:integration   # requires CQL_LS_JAR_PATH pointing at a real jar
 | `npm run test:net` | Network tests against local fake repos and proxies (no JDK or real jar needed) |
 | `npm test` | Unit + integration |
 | `npm run smoke` | End-to-end MCP stdio smoke (requires `CQL_LS_JAR_PATH`) |
+| `npm run test:e2e` | Restricted-network E2E: docker compose with an internal network, a private Reposilite mirror, squid and a TLS-intercepting proxy (needs Docker; scenario B downloads from the real Maven Central) |
 
 ## Smoke test
 

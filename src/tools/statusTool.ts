@@ -34,6 +34,7 @@ export const getStatusTool: Tool = {
         phase: runtime.phase ?? null,
         download: runtime.download ?? null,
         error: runtime.error ?? null,
+        retryAt: runtime.retryAt ?? null,
       },
       jarPath: runtime.jarPath ?? null,
       jarSource: runtime.jarSource ?? null,

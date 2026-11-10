@@ -239,4 +239,128 @@ describe('jvm/runtimeResolver', () => {
       expect(error?.message).to.include('No Java >= 17 found');
     });
   });
+
+  describe('retry backoff after a failure', () => {
+    const tick = () => new Promise<void>((r) => setImmediate(r));
+
+    function failing() {
+      let now = 1_000_000;
+      let attempts = 0;
+      let fail = true;
+      const r = new RuntimeResolver({
+        findJava: () => JAVA,
+        resolveJar: async () => {
+          attempts += 1;
+          if (fail) throw new Error('mirror unreachable');
+          return JAR;
+        },
+        now: () => now,
+      });
+      return {
+        r,
+        attempts: () => attempts,
+        advance: (ms: number) => {
+          now += ms;
+        },
+        succeed: () => {
+          fail = false;
+        },
+      };
+    }
+
+    it('start() makes one attempt per backoff window (5 s, 10 s, ... capped at 60 s)', async () => {
+      const t = failing();
+      t.r.start();
+      await tick();
+      await tick();
+      expect(t.attempts()).to.equal(1);
+      expect(t.r.status().state).to.equal('failed');
+
+      // Rapid polling inside the window does not retry and the state stays failed.
+      for (let i = 0; i < 50; i += 1) t.r.start();
+      await tick();
+      expect(t.attempts()).to.equal(1);
+      expect(t.r.status().state).to.equal('failed');
+
+      t.advance(4_999);
+      t.r.start();
+      await tick();
+      expect(t.attempts()).to.equal(1);
+
+      t.advance(1);
+      t.r.start();
+      await tick();
+      await tick();
+      expect(t.attempts()).to.equal(2);
+
+      // Second failure doubles the window to 10 s.
+      t.advance(9_999);
+      t.r.start();
+      await tick();
+      expect(t.attempts()).to.equal(2);
+      t.advance(1);
+      t.r.start();
+      await tick();
+      await tick();
+      expect(t.attempts()).to.equal(3);
+
+      // The window never exceeds 60 s.
+      for (let i = 0; i < 6; i += 1) {
+        t.advance(60_000);
+        t.r.start();
+        await tick();
+        await tick();
+      }
+      const before = t.attempts();
+      t.advance(59_999);
+      t.r.start();
+      await tick();
+      expect(t.attempts()).to.equal(before);
+      t.advance(1);
+      t.r.start();
+      await tick();
+      await tick();
+      expect(t.attempts()).to.equal(before + 1);
+    });
+
+    it('status() reports retryAt (ISO) while failed', async () => {
+      const t = failing();
+      t.r.start();
+      await tick();
+      await tick();
+      expect(t.r.status().retryAt).to.equal(new Date(1_000_000 + 5_000).toISOString());
+    });
+
+    it('resolve() (a real tool call) bypasses the backoff', async () => {
+      const t = failing();
+      t.r.start();
+      await tick();
+      await tick();
+      expect(t.attempts()).to.equal(1);
+      let error: Error | null = null;
+      try {
+        await t.r.resolve();
+      } catch (err) {
+        error = err as Error;
+      }
+      expect(error?.message).to.include('mirror unreachable');
+      expect(t.attempts()).to.equal(2);
+    });
+
+    it('a success resets the backoff', async () => {
+      const t = failing();
+      t.r.start();
+      await tick();
+      await tick();
+      t.advance(5_000);
+      t.r.start();
+      await tick();
+      await tick();
+      expect(t.attempts()).to.equal(2); // window is now 10 s
+      t.succeed();
+      await t.r.resolve();
+      expect(t.r.status().state).to.equal('ready');
+      expect(t.r.status().retryAt).to.equal(undefined);
+    });
+  });
 });

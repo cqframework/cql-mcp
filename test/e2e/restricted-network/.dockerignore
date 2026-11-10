@@ -1,0 +1,3 @@
+# The build context only needs the packed tarball and run.mjs; keep the 200 MB jars out of it.
+.work/*
+!.work/pkg
