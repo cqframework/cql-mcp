@@ -17,3 +17,4 @@ what was rejected.
 | ADR | Title | Status |
 | --- | --- | --- |
 | [0001](0001-runtime-dependency-resolution.md) | Runtime dependency resolution (Java and the CQL Language Server jar) | Proposed |
+| [0002](0002-language-server-runtime-network-access.md) | Language server runtime network access (FHIR packages, proxies, TLS) | Proposed |

@@ -16,11 +16,17 @@ things npm doesn't provide:
 
 Facts that shape the decision:
 
-- **The jar is self-contained.** `cql-ls-server` is built with `maven-shade-plugin` without
-  `shadedArtifactAttached`, so the artifact published to Central *is* the fat jar (about 210 MB).
-  It bundles `clinical-reasoning`, `clinical_quality_language` (cql-to-elm, engine) and HAPI FHIR.
-  Those libraries live in `~/.m2` only for people who build the language server. Running the jar
-  needs nothing from a Maven repository.
+- **The jar contains all of its code.** `cql-ls-server` is built with `maven-shade-plugin`
+  without `shadedArtifactAttached`, so the artifact published to Central *is* the fat jar (about
+  210 MB). The classes of `clinical-reasoning`, `clinical_quality_language` (cql-to-elm, engine,
+  ELM) and HAPI FHIR are copied into it at build time. The 5.0.0 jar has 63,890 entries, no
+  manifest `Class-Path` and no nested jars. Maven downloads those libraries into `~/.m2` only for
+  people who build the language server. Running the jar needs nothing from a Maven repository.
+- **The LS has its own runtime network access, which this ADR doesn't cover.** When an IG
+  declares FHIR package dependencies, the LS (`IgContextManager`, through HAPI's
+  `FilesystemPackageCacheManager`) reads `~/.fhir/packages` and fetches any missing packages from
+  a FHIR package registry. That traffic comes from the JVM, so cql-mcp's `HTTPS_PROXY` and
+  `NODE_EXTRA_CA_CERTS` handling (§2.5) doesn't apply to it. ADR-0002 covers it.
 - **No tool puts the LS jar in `~/.m2`.** vscode-cql downloads it straight from
   `https://repo1.maven.org/maven2/...` into its own extension folder
   (`<extension>/dist/java-support/jars/`, see `javaServiceInstaller.ts`). It never runs Maven and
@@ -58,11 +64,10 @@ including which source supplied the jar (`jarSource`).
 | --- | --- | --- |
 | 1 | `CQL_LS_JAR_PATH` | Run in place |
 | 2 | cql-mcp cache: `<CQL_MCP_JAR_DIR or ~/.cql-mcp/jars>/cql-ls-server-<ver>.jar` | Run in place |
-| 3 | Legacy cache `~/.cql-debug-mcp/jars/` (only when `CQL_MCP_JAR_DIR` is unset) | Run in place |
-| 4 | vscode-cql jar: `~/{.vscode,.vscode-insiders,.vscode-server,.vscode-oss}/extensions/cqframework.cql-*/dist/java-support/jars/cql-ls-server-<ver>.jar`, exact version only | **Copy** into the cache, then run from the cache |
-| 5 | Download from `CQL_LS_MAVEN_REPO`, only when it is set (optional `CQL_LS_MAVEN_USERNAME`/`CQL_LS_MAVEN_PASSWORD`) | Into the cache |
-| 6 | Download from the `settings.xml` mirror whose `<mirrorOf>` matches `central`, with credentials from the `<server>` that has the same `<id>` | Into the cache |
-| 7 | Download from Maven Central | Into the cache |
+| 3 | vscode-cql jar: `~/{.vscode,.vscode-insiders,.vscode-server,.vscode-oss}/extensions/cqframework.cql-*/dist/java-support/jars/cql-ls-server-<ver>.jar`, exact version only | **Copy** into the cache, then run from the cache |
+| 4 | Download from `CQL_LS_MAVEN_REPO`, only when it is set (optional `CQL_LS_MAVEN_USERNAME`/`CQL_LS_MAVEN_PASSWORD`) | Into the cache |
+| 5 | Download from the `settings.xml` mirror whose `<mirrorOf>` matches `central`, with credentials from the `<server>` that has the same `<id>` | Into the cache |
+| 6 | Download from Maven Central | Into the cache |
 
 Each download URL is tried once. If every source fails, one error lists each path and URL that
 was tried and why it failed, without credentials.
