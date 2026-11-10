@@ -179,8 +179,9 @@ export class RuntimeResolver {
       });
     } catch (err) {
       if (err instanceof JarInstallError) {
+        // JarInstallError messages usually end with a period; don't double it.
         throw new Error(
-          `Failed to obtain the cql-language-server jar: ${err.message}. ` +
+          `Failed to obtain the cql-language-server jar: ${err.message.replace(/[.\s]+$/, '')}. ` +
             `Set CQL_LS_JAR_PATH to a local jar to bypass download.`,
         );
       }

@@ -84,6 +84,45 @@ describe('jvm/runtimeResolver', () => {
     });
   });
 
+  describe('jar failure message punctuation', () => {
+    const failWith = async (message: string): Promise<string> => {
+      const r = new RuntimeResolver({
+        findJava: () => JAVA,
+        resolveJar: async () => {
+          throw new JarInstallError(message);
+        },
+      });
+      try {
+        await r.resolve();
+      } catch (err) {
+        return (err as Error).message;
+      }
+      throw new Error('expected resolve() to fail');
+    };
+
+    for (const [title, message] of [
+      ['ends with a period', 'CQL_LS_JAR_PATH points to a missing file: /x.jar. Set it to an existing cql-ls-server jar.'],
+      ['has no trailing period', 'HTTP 503'],
+      ['ends with several periods and whitespace', 'nothing worked... \n'],
+    ] as const) {
+      it(`exactly one period before " Set CQL_LS_JAR_PATH" when the message ${title}`, async () => {
+        const text = await failWith(message);
+        expect(text).to.include('. Set CQL_LS_JAR_PATH to a local jar to bypass download.');
+        expect(text).to.not.include('..');
+        expect(text).to.not.match(/\.\s*\.\s/);
+        expect(text.startsWith('Failed to obtain the cql-language-server jar: ')).to.equal(true);
+      });
+    }
+
+    it('keeps internal text of the message intact', async () => {
+      const text = await failWith('Could not obtain x.jar. Tried:\n  - cache /c: not found.');
+      expect(text).to.equal(
+        'Failed to obtain the cql-language-server jar: Could not obtain x.jar. Tried:\n  - cache /c: not found. ' +
+          'Set CQL_LS_JAR_PATH to a local jar to bypass download.',
+      );
+    });
+  });
+
   it('does not cache a failure: the next resolve() retries and can succeed', async () => {
     let attempt = 0;
     const r = new RuntimeResolver({
