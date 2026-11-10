@@ -19,3 +19,4 @@ what was rejected.
 | [0001](0001-runtime-dependency-resolution.md) | Runtime dependency resolution (Java and the CQL Language Server jar) | Accepted |
 | [0002](0002-language-server-runtime-network-access.md) | Language server runtime network access (moved to cql-language-server ADR-0001) | Superseded by cql-language-server ADR-0001 |
 | [0003](0003-host-native-path-handling.md) | Host-native path handling | Accepted |
+| [0004](0004-mcp-tool-contract.md) | MCP tool contract (errors, validation, annotations, output size) | Accepted |
