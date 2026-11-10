@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { DiagnosticSeverity } from 'vscode-languageserver-protocol';
 import { validateTool } from '../../../src/tools/validateTool.js';
 import type { McpContext } from '../../../src/tools/defs.js';
+import { fixedRuntime } from '../../helpers/fixedRuntime.js';
 
 describe('tools/validateTool', () => {
   it('throws an error if cqlFile argument is missing', async () => {
@@ -55,8 +56,7 @@ describe('tools/validateTool', () => {
     const mockContext: McpContext = {
       process: mockProcess as any,
       debugSession: {} as any,
-      jarPath: '/jar',
-      javaVersion: 17,
+      runtime: fixedRuntime('/java', '/jar'),
       workspaceRoot: '/workspace',
     };
 
@@ -94,8 +94,7 @@ describe('tools/validateTool', () => {
     const mockContext: McpContext = {
       process: mockProcess as any,
       debugSession: {} as any,
-      jarPath: '/jar',
-      javaVersion: 17,
+      runtime: fixedRuntime('/java', '/jar'),
       workspaceRoot: '/workspace',
     };
 

@@ -7,6 +7,7 @@ import { signaturesTool } from '../../src/tools/signaturesTool.js';
 import { resolveIncludesTool } from '../../src/tools/resolveIncludesTool.js';
 import { validateTool } from '../../src/tools/validateTool.js';
 import type { McpContext } from '../../src/tools/defs.js';
+import { fixedRuntime } from '../helpers/fixedRuntime.js';
 
 function findJar(): string | null {
   const envJar = process.env.CQL_LS_JAR_PATH;
@@ -58,8 +59,7 @@ describe('staticInference integration (real JVM)', () => {
   before(async () => {
     if (!available) return;
     proc = new CqlLsProcess({
-      javaPath: java!.javaPath,
-      jarPath: jar!,
+      runtime: fixedRuntime(java!.javaPath, jar!),
       workspacePath: projectRoot,
       logbackConfigFile: LOGBACK_FILE,
     });
@@ -67,8 +67,7 @@ describe('staticInference integration (real JVM)', () => {
     context = {
       process: proc,
       debugSession: {} as any,
-      jarPath: jar!,
-      javaVersion: java!.version,
+      runtime: fixedRuntime(java!.javaPath, jar!, java!.version),
       workspaceRoot: projectRoot,
     };
   });

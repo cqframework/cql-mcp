@@ -12,6 +12,7 @@ import {
   runFileTool,
   runSuiteTool,
 } from '../../../src/tools/testPipelineTools.js';
+import { fixedRuntime } from '../../helpers/fixedRuntime.js';
 
 interface MockProcessState {
   /** Each entry is one "library response" — combined into a single executeCql response. */
@@ -70,8 +71,7 @@ function mkContext(opts: {
   return {
     process: proc,
     debugSession: {} as DapSession,
-    jarPath: '/dummy.jar',
-    javaVersion: 17,
+    runtime: fixedRuntime('/java', '/jar'),
     workspaceRoot: opts.workspaceRoot,
   };
 }

@@ -11,6 +11,8 @@ export interface MavenCoords {
 }
 
 export const DEFAULT_CQL_LS_VERSION = '5.0.0';
+/** Minimum gap between onProgress callbacks; a final one is always sent. */
+const PROGRESS_INTERVAL_MS = 250;
 export const DEFAULT_MAVEN_REPO = 'https://repo1.maven.org/maven2/';
 
 export interface JarResolution {
@@ -24,7 +26,7 @@ export interface JarInstallOptions {
   version?: string;
   mavenRepo?: string;
   fetchImpl?: typeof fetch;
-  onProgress?: (detail: { received: number; total?: number }) => void;
+  onProgress?: (detail: { url: string; bytes: number; totalBytes?: number }) => void;
 }
 
 export class JarInstallError extends Error {
@@ -160,6 +162,7 @@ async function installJar(
     const writer = fs.createWriteStream(partPath);
     const reader = res.body.getReader();
     let received = 0;
+    let lastProgress = 0;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) {
@@ -169,8 +172,13 @@ async function installJar(
       await new Promise<void>((resolve, reject) => {
         writer.write(value, (err) => (err ? reject(err) : resolve()));
       });
-      options?.onProgress?.({ received, total });
+      const now = Date.now();
+      if (now - lastProgress >= PROGRESS_INTERVAL_MS) {
+        lastProgress = now;
+        options?.onProgress?.({ url, bytes: received, totalBytes: total });
+      }
     }
+    options?.onProgress?.({ url, bytes: received, totalBytes: total });
     await new Promise<void>((resolve, reject) => {
       writer.end((err: Error | null) => (err ? reject(err) : resolve()));
     });

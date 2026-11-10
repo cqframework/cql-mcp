@@ -6,6 +6,7 @@ import type { ChildProcess } from 'node:child_process';
 import type { MessageConnection } from 'vscode-jsonrpc/node';
 import { CqlLsProcess, LanguageServerCrashedError } from '../../../src/jvm/cqlLsProcess.js';
 import { createServerConnection } from '../../helpers/channel.js';
+import { fixedRuntime } from '../../helpers/fixedRuntime.js';
 
 class FakeChild extends EventEmitter {
   pid = 1000 + Math.floor(Math.random() * 9000);
@@ -98,8 +99,7 @@ describe('jvm/cqlLsProcess', () => {
   it('spawns with expected args, initializes, and round-trips executeCommand', async () => {
     const harness = makeHarness();
     const proc = new CqlLsProcess({
-      javaPath: '/opt/java',
-      jarPath: '/jars/cql-ls-server.jar',
+      runtime: fixedRuntime('/opt/java', '/jars/cql-ls-server.jar'),
       workspacePath: '/work',
       spawnImpl: harness.spawnImpl,
       initializeTimeoutMs: 2000,
@@ -126,8 +126,7 @@ describe('jvm/cqlLsProcess', () => {
   it('recovers from a crash by respawning transparently on the next call', async () => {
     const harness = makeHarness();
     const proc = new CqlLsProcess({
-      javaPath: '/opt/java',
-      jarPath: '/jars/cql-ls-server.jar',
+      runtime: fixedRuntime('/opt/java', '/jars/cql-ls-server.jar'),
       workspacePath: '/work',
       spawnImpl: harness.spawnImpl,
       initializeTimeoutMs: 2000,
@@ -155,8 +154,7 @@ describe('jvm/cqlLsProcess', () => {
   it('rejects an in-flight command with a structured crash error when the JVM dies mid-call', async () => {
     const harness = makeHarness({ holdExecuteReplies: true });
     const proc = new CqlLsProcess({
-      javaPath: '/opt/java',
-      jarPath: '/jars/cql-ls-server.jar',
+      runtime: fixedRuntime('/opt/java', '/jars/cql-ls-server.jar'),
       workspacePath: '/work',
       spawnImpl: harness.spawnImpl,
       initializeTimeoutMs: 2000,
@@ -186,8 +184,7 @@ describe('jvm/cqlLsProcess', () => {
   it('fails cleanly and marks crashed when the server never answers initialize', async () => {
     const harness = makeHarness({ hangInitialize: true });
     const proc = new CqlLsProcess({
-      javaPath: '/opt/java',
-      jarPath: '/jars/cql-ls-server.jar',
+      runtime: fixedRuntime('/opt/java', '/jars/cql-ls-server.jar'),
       workspacePath: '/work',
       spawnImpl: harness.spawnImpl,
       initializeTimeoutMs: 50,
@@ -208,8 +205,7 @@ describe('jvm/cqlLsProcess', () => {
   it('hard-stops at the respawn limit', async () => {
     const harness = makeHarness({ hangInitialize: true });
     const proc = new CqlLsProcess({
-      javaPath: '/opt/java',
-      jarPath: '/jars/cql-ls-server.jar',
+      runtime: fixedRuntime('/opt/java', '/jars/cql-ls-server.jar'),
       workspacePath: '/work',
       spawnImpl: harness.spawnImpl,
       initializeTimeoutMs: 20,
@@ -238,8 +234,7 @@ describe('jvm/cqlLsProcess', () => {
   it('stop() does not wait forever when the server never answers shutdown', async () => {
     const harness = makeHarness({ hangShutdown: true });
     const proc = new CqlLsProcess({
-      javaPath: '/opt/java',
-      jarPath: '/jars/cql-ls-server.jar',
+      runtime: fixedRuntime('/opt/java', '/jars/cql-ls-server.jar'),
       workspacePath: '/work',
       spawnImpl: harness.spawnImpl,
       initializeTimeoutMs: 2000,
@@ -258,8 +253,7 @@ describe('jvm/cqlLsProcess', () => {
   it('refuses new work after being stopped', async () => {
     const harness = makeHarness();
     const proc = new CqlLsProcess({
-      javaPath: '/opt/java',
-      jarPath: '/jars/cql-ls-server.jar',
+      runtime: fixedRuntime('/opt/java', '/jars/cql-ls-server.jar'),
       workspacePath: '/work',
       spawnImpl: harness.spawnImpl,
       initializeTimeoutMs: 2000,
@@ -321,8 +315,7 @@ describe('jvm/cqlLsProcess', () => {
     })();
 
     const proc = new CqlLsProcess({
-      javaPath: '/opt/java',
-      jarPath: '/jars/cql-ls-server.jar',
+      runtime: fixedRuntime('/opt/java', '/jars/cql-ls-server.jar'),
       workspacePath: '/work',
       spawnImpl: harness.spawnImpl,
       initializeTimeoutMs: 40,

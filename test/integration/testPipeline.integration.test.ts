@@ -8,6 +8,7 @@ import { DapSession } from '../../src/dap/dapSession.js';
 import { runFileTool, runSuiteTool, listRunsTool, diffTool } from '../../src/tools/testPipelineTools.js';
 import type { McpContext } from '../../src/tools/defs.js';
 import { readLatestPointer } from '../../src/testPipeline/resultStore.js';
+import { fixedRuntime } from '../helpers/fixedRuntime.js';
 
 function findJar(): string | null {
   const envJar = process.env.CQL_LS_JAR_PATH;
@@ -66,16 +67,14 @@ describe('test pipeline integration (real JVM)', () => {
     fs.mkdirSync(path.join(dstLibraryDir, 'shared'), { recursive: true });
     createdTempDir = true;
     proc = new CqlLsProcess({
-      javaPath: java!.javaPath,
-      jarPath: jar!,
+      runtime: fixedRuntime(java!.javaPath, jar!),
       workspacePath: workspaceRoot,
       logbackConfigFile: LOGBACK_FILE,
     });
     ctx = {
       process: proc,
       debugSession: {} as DapSession,
-      jarPath: jar!,
-      javaVersion: java!.version,
+      runtime: fixedRuntime(java!.javaPath, jar!, java!.version),
       workspaceRoot,
     };
     await proc.ensureReady();

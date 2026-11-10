@@ -4,8 +4,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { CqlLsProcess, LanguageServerCrashedError } from './jvm/cqlLsProcess.js';
-import { ensureJar, JarInstallError } from './jvm/jarInstaller.js';
-import { findJavaRuntime } from './jvm/javaLocator.js';
+import { RuntimeResolver } from './jvm/runtimeResolver.js';
 import { DapSession } from './dap/dapSession.js';
 import { log, configureLog } from './log.js';
 import type { McpContext, Tool } from './tools/defs.js';
@@ -41,41 +40,11 @@ async function start(): Promise<void> {
 
   const workspaceRoot = resolveWorkspaceRoot();
 
-  let java;
-  try {
-    java = findJavaRuntime();
-  } catch (err) {
-    log.warn('Java detection errored', { message: err instanceof Error ? err.message : String(err) });
-  }
-  if (!java) {
-    throw new Error(
-      `No Java >= 17 found. Set JAVA_HOME or add java to PATH. Detected candidates: ${[
-        process.env.JAVA_HOME ? process.env.JAVA_HOME + '/bin/java' : '',
-        'java (PATH)',
-      ]
-        .filter(Boolean)
-        .join(', ')}`,
-    );
-  }
-
-  let jarPath: string;
-  try {
-    const jar = await ensureJar();
-    jarPath = jar.jarPath;
-    log.info(`Using cql-language-server jar: ${jarPath} (source=${jar.source})`);
-  } catch (err) {
-    if (err instanceof JarInstallError) {
-      throw new Error(
-        `Failed to obtain the cql-language-server jar: ${err.message}. ` +
-          `Set CQL_LS_JAR_PATH to a local jar to bypass download.`,
-      );
-    }
-    throw err;
-  }
-
+  // Java and the jar are resolved lazily on first use (ADR-0001 §2.2), so a missing JDK or a slow
+  // first-run download never blocks `initialize`.
+  const runtime = new RuntimeResolver();
   const lsProcess = new CqlLsProcess({
-    javaPath: java.javaPath,
-    jarPath,
+    runtime,
     workspacePath: workspaceRoot,
     logFile: process.env.CQL_MCP_LOG_FILE,
   });
@@ -85,8 +54,7 @@ async function start(): Promise<void> {
   const context: McpContext = {
     process: lsProcess,
     debugSession,
-    jarPath,
-    javaVersion: java.version,
+    runtime,
     workspaceRoot,
   };
 
@@ -175,7 +143,7 @@ async function start(): Promise<void> {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  log.info(`${SERVER_NAME} ${SERVER_VERSION} ready (workspace=${workspaceRoot}, java=${java.javaPath} v${java.version})`);
+  log.info(`${SERVER_NAME} ${SERVER_VERSION} ready (workspace=${workspaceRoot}; Java and the language-server jar are resolved on first use)`);
 }
 
 function safeLogArgs(args: Record<string, unknown>): Record<string, unknown> {

@@ -5,6 +5,7 @@ import { CqlLsProcess } from '../../src/jvm/cqlLsProcess.js';
 import { findJavaRuntime } from '../../src/jvm/javaLocator.js';
 import { DapSession, type DapEvaluationResult, type DapStopEvent } from '../../src/dap/dapSession.js';
 import { configureLog } from '../../src/log.js';
+import { fixedRuntime } from '../helpers/fixedRuntime.js';
 
 configureLog({ level: 'debug' });
 
@@ -45,8 +46,7 @@ const LOGBACK_FILE =
 
 function newProcess(java: { javaPath: string }, jar: string, workspacePath: string): CqlLsProcess {
   return new CqlLsProcess({
-    javaPath: java.javaPath,
-    jarPath: jar,
+    runtime: fixedRuntime(java.javaPath, jar),
     workspacePath,
     logbackConfigFile: LOGBACK_FILE,
     logFile: process.env.CQL_MCP_LOG_FILE,

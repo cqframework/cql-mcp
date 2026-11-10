@@ -9,6 +9,7 @@ import type { McpContext } from '../../src/tools/defs.js';
 import { buildExecuteCqlRequest, executeCqlTool, type CqlExecuteResult } from '../../src/tools/executeCqlTool.js';
 import { runSuite } from '../../src/testPipeline/suiteRunner.js';
 import { pathToUri } from '../../src/workspace/paths.js';
+import { fixedRuntime } from '../helpers/fixedRuntime.js';
 
 function findJar(): string | null {
   const envJar = process.env.CQL_LS_JAR_PATH;
@@ -64,16 +65,14 @@ describe('IG layout integration (real JVM)', () => {
     console.log(`integration: java=${java!.javaPath} (v${java!.version}), jar=${jar}`);
     runStore = fs.mkdtempSync(path.join(os.tmpdir(), 'ig-layout-runs-'));
     proc = new CqlLsProcess({
-      javaPath: java!.javaPath,
-      jarPath: jar!,
+      runtime: fixedRuntime(java!.javaPath, jar!),
       workspacePath: projectRoot,
       logbackConfigFile: LOGBACK_FILE,
     });
     ctx = {
       process: proc,
       debugSession: {} as DapSession,
-      jarPath: jar!,
-      javaVersion: java!.version,
+      runtime: fixedRuntime(java!.javaPath, jar!, java!.version),
       workspaceRoot: runStore,
     };
     await proc.ensureReady();

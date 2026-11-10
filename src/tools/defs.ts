@@ -1,11 +1,11 @@
 import type { CqlLsProcess } from '../jvm/cqlLsProcess.js';
+import type { RuntimeResolver } from '../jvm/runtimeResolver.js';
 import type { DapSession } from '../dap/dapSession.js';
 
 export interface McpContext {
   process: CqlLsProcess;
   debugSession: DapSession;
-  jarPath: string;
-  javaVersion: number | null;
+  runtime: RuntimeResolver;
   workspaceRoot: string;
 }
 

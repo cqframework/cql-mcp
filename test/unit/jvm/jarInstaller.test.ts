@@ -203,7 +203,7 @@ describe('jvm/jarInstaller', () => {
           responseWith(200, content),
         ]);
         let received = 0;
-        const result = await ensureJar({ fetchImpl: fetchImpl as unknown as typeof fetch, onProgress: (d) => { received = d.received; } });
+        const result = await ensureJar({ fetchImpl: fetchImpl as unknown as typeof fetch, onProgress: (d) => { received = d.bytes; } });
         const jarPath = path.join(dir, 'cql-ls-server-1.0.0.jar');
         expect(result).to.deep.equal({ jarPath, downloaded: true, source: 'download' });
         expect(fs.readFileSync(jarPath, 'utf8')).to.equal('jar-bytes');

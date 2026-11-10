@@ -7,6 +7,7 @@ import { findJavaRuntime } from '../../src/jvm/javaLocator.js';
 import { executeCql, VIEW_ELM } from '../../src/lsp/lspCommands.js';
 import { buildExecuteCqlRequest, openCqlFile } from '../../src/tools/executeCqlTool.js';
 import { pathToUri } from '../../src/workspace/paths.js';
+import { fixedRuntime } from '../helpers/fixedRuntime.js';
 
 function findJar(): string | null {
   const envJar = process.env.CQL_LS_JAR_PATH;
@@ -49,7 +50,7 @@ describe('documentSync integration (real JVM)', () => {
     }
     // A probe directory outside the server's workspace folder (projectRoot).
     scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'cql-probe-'));
-    proc = new CqlLsProcess({ javaPath: java!.javaPath, jarPath: jar!, workspacePath: projectRoot, logbackConfigFile: LOGBACK_FILE });
+    proc = new CqlLsProcess({ runtime: fixedRuntime(java!.javaPath, jar!), workspacePath: projectRoot, logbackConfigFile: LOGBACK_FILE });
     await proc.ensureReady();
   });
 

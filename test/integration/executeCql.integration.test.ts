@@ -5,6 +5,7 @@ import { CqlLsProcess } from '../../src/jvm/cqlLsProcess.js';
 import { findJavaRuntime } from '../../src/jvm/javaLocator.js';
 import { executeCql } from '../../src/lsp/lspCommands.js';
 import { buildExecuteCqlRequest, openCqlFile } from '../../src/tools/executeCqlTool.js';
+import { fixedRuntime } from '../helpers/fixedRuntime.js';
 
 function findJar(): string | null {
   const envJar = process.env.CQL_LS_JAR_PATH;
@@ -38,7 +39,7 @@ const LOGBACK_FILE =
   path.resolve(projectRoot, '..', 'cql-language-server', 'ls', 'server', 'src', 'main', 'resources', 'logback.xml');
 
 function newProcess(java: { javaPath: string }, jar: string, workspacePath: string): CqlLsProcess {
-  return new CqlLsProcess({ javaPath: java.javaPath, jarPath: jar, workspacePath, logbackConfigFile: LOGBACK_FILE });
+  return new CqlLsProcess({ runtime: fixedRuntime(java.javaPath, jar), workspacePath, logbackConfigFile: LOGBACK_FILE });
 }
 
 describe('executeCql integration (real JVM)', () => {

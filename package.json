@@ -43,6 +43,7 @@
     "pretest": "tsc -p tsconfig.json",
     "test": "npm run pretest && mocha \"dist/test/unit/**/*.test.js\" \"dist/test/integration/**/*.test.js\" --timeout 180000",
     "test:unit": "npm run pretest && mocha \"dist/test/unit/**/*.test.js\" --timeout 15000",
+    "test:net": "npm run pretest && mocha \"dist/test/net/**/*.test.js\" --timeout 30000",
     "test:integration": "npm run pretest && mocha \"dist/test/integration/**/*.test.js\" --timeout 180000",
     "smoke": "bash scripts/smoke.sh \"$PWD\" \"$PWD\" \"${CQL_LS_JAR_PATH:?CQL_LS_JAR_PATH must be set}\"",
     "prepack": "npm run compile"

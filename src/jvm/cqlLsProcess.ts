@@ -5,6 +5,7 @@ import { StreamMessageReader, StreamMessageWriter } from 'vscode-jsonrpc/node';
 import type { WorkspaceFolder } from 'vscode-languageserver-protocol';
 import { log, tailOf } from '../log.js';
 import { LspClient } from '../lsp/lspClient.js';
+import type { RuntimeResolver, ResolvedRuntime } from './runtimeResolver.js';
 import { pathToUri } from '../workspace/paths.js';
 import { registerWorkspaceFolder } from '../lsp/documentSync.js';
 
@@ -26,8 +27,7 @@ export class LanguageServerCrashedError extends Error {
 }
 
 export interface CqlLsProcessOptions {
-  javaPath: string;
-  jarPath: string;
+  runtime: RuntimeResolver;
   workspacePath: string;
   logFile?: string;
   /** External logback.xml to force via -Dlogback.configurationFile. Guarantees
@@ -59,6 +59,7 @@ export class CqlLsProcess {
   private stderrTail: string[] = [];
   private lifecycleCount = 0;
   private readyPromise: Promise<void> | null = null;
+  private startPromise: Promise<void> | null = null;
   private stopping = false;
 
   constructor(private readonly opts: CqlLsProcessOptions) {
@@ -96,11 +97,14 @@ export class CqlLsProcess {
     if (this.state === 'stopping' || this.state === 'stopped') {
       throw new Error('CQL language server has been shut down');
     }
-    if (this.state === 'starting') {
-      await this.readyPromise;
-      return;
+    // One shared start: resolution (which may download a jar) happens before state becomes
+    // 'starting', so concurrent callers must join the same attempt.
+    if (!this.startPromise) {
+      this.startPromise = this.spawnAndInitialize().finally(() => {
+        this.startPromise = null;
+      });
     }
-    await this.spawnAndInitialize();
+    await this.startPromise;
   }
 
   async executeCommand(command: string, args: unknown[]): Promise<unknown> {
@@ -129,6 +133,12 @@ export class CqlLsProcess {
       );
     }
 
+    // Rejects with the clear "No Java" / jar error; nothing has been spawned or counted yet.
+    const runtime: ResolvedRuntime = await this.opts.runtime.resolve();
+    if (this.state === 'stopping' || this.state === 'stopped') {
+      throw new Error('CQL language server has been shut down');
+    }
+
     const spawnImpl = this.opts.spawnImpl ?? spawn;
     this.lifecycleCount += 1;
     this.stopping = false;
@@ -136,8 +146,8 @@ export class CqlLsProcess {
     this.crash = null;
     this.stderrTail = [];
 
-    const args = this.buildArgs();
-    const child = spawnImpl(this.opts.javaPath, args, {
+    const args = this.buildArgs(runtime.jarPath);
+    const child = spawnImpl(runtime.javaPath, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env,
     });
@@ -331,7 +341,7 @@ export class CqlLsProcess {
     });
   }
 
-  private buildArgs(): string[] {
+  private buildArgs(jarPath: string): string[] {
     const args: string[] = ['-Xmx4g'];
     if (this.opts.logFile) {
       args.push(`-DLOG_FILE=${this.opts.logFile}`);
@@ -339,7 +349,7 @@ export class CqlLsProcess {
     if (this.opts.logbackConfigFile) {
       args.push(`-Dlogback.configurationFile=${this.opts.logbackConfigFile}`);
     }
-    args.push('-jar', this.opts.jarPath);
+    args.push('-jar', jarPath);
     // The LS carries a TODO for full -workspace support; pass it anyway for
     // forward-compat and do not assume it drives file resolution.
     args.push('-workspace', this.opts.workspacePath);

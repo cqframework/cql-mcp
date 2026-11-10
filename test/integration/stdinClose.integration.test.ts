@@ -140,8 +140,15 @@ describe('stdin close integration (real node + JVM)', () => {
     this.timeout(120_000);
     mcp = new McpChild(jar!, workspace);
     await mcp.initialize();
-    const status = await mcp.request(2, 'tools/call', { name: 'cql_get_status', arguments: {} }, 90_000);
-    expect(JSON.parse(status.result?.content?.[0]?.text ?? '{}').ready).to.equal(true);
+    // cql_get_status starts resolving Java and the jar in the background and returns at once, so
+    // poll until the LS is up.
+    let ready = false;
+    for (let id = 2; !ready && id < 200; id += 1) {
+      const status = await mcp.request(id, 'tools/call', { name: 'cql_get_status', arguments: {} }, 90_000);
+      ready = JSON.parse(status.result?.content?.[0]?.text ?? '{}').ready === true;
+      if (!ready) await new Promise((r) => setTimeout(r, 200));
+    }
+    expect(ready).to.equal(true);
     const children = execFileSync('pgrep', ['-P', String(mcp.child.pid)], { encoding: 'utf8' }).trim().split('\n');
     expect(children).to.have.length(1);
     jvmPid = Number(children[0]);
