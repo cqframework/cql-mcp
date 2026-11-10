@@ -26,10 +26,24 @@ inside `cql-ls-server-5.0.0.jar`:
 | Default registries | `https://packages2.fhir.org/packages` (primary), then `https://packages.fhir.org`. `https://build.fhir.org` is used for `current` CI builds. |
 | Configuration file | `fhir-settings.json`. The path comes from the `-Dfhir.settings.path` system property, otherwise `~/.fhir/fhir-settings.json`. |
 | Mirrors | `servers[]` entries with `type: "fhir-package"` or `"npm-package"` are tried **before** the defaults. They can use `authenticationType` `basic` (username and password), `token` or `apikey`. Setting `ignoreDefaultPackageServers: true` removes the public registries. |
-| Offline | `prohibitNetworkAccess: true` blocks all HTTP, so only `~/.fhir/packages` is used. |
+| Fallback past the mirror | **Reproduced 2026-11-10.** If no configured server supplies the package, for **any** failure (404, 401, connection refused, or a failed tarball download), HAPI still contacts `build.fhir.org` (`CIBuildClient`, then `fetchTheOldWay`, `FilesystemPackageCacheManager.java:840`), even with `ignoreDefaultPackageServers: true`. That setting only filters HAPI's default *registry* list. The fallback is logged at DEBUG, plus a WARN from `PackageClient` for the version-listing call. Nothing at INFO or above says it's going to a public site. |
+| Mirror API (`npm-package`) | `GET <url>/<id>/<version>` (`Accept: application/json`) must return JSON with an absolute `dist.tarball` URL. HAPI then fetches `GET <dist.tarball>`. If that fails, it retries with `<major>.<minor>.x`, via `GET <url>/<id>` (a `versions` map). A `fhir-package` server serves the tarball directly at `<url>/<id>/<version>`. |
+| Mirror auth | `token`: `Authorization: Bearer <token>`. `basic`: `Authorization: Basic …`. `apikey`: `Api-Key: <key>`. **Credentials are only sent to URLs with the same protocol, host and port whose path starts with the server `url`'s path** (`ManagedWebAccessUtils.urlMatchesOrigin`). A tarball served from elsewhere, for example `/tarballs/…` when `url` is `…/packages`, or a CDN, gets **no** auth header, fails with 401, and triggers the public fallback. |
+| Offline | `prohibitNetworkAccess: true` blocks all HTTP, so only `~/.fhir/packages` is used. It also blocks the mirror, so it can't be combined with a mirror-only setup. |
 | HTTP client | Package downloads go through `ManagedWebAccessor`, then `SimpleHTTPClient`, which uses `java.net.URL.openConnection()` (plain `HttpURLConnection`). |
 | Proxy | `HttpURLConnection` follows the JVM's `https.proxyHost`/`https.proxyPort`, `http.proxyHost`/`http.proxyPort`, `http.nonProxyHosts` and `java.net.useSystemProxies` settings. It **ignores** `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`. HAPI only reads `http.proxyUser`/`http.proxyPassword` in its OkHttp-based FHIR client, **not** on the package download path, so proxy credentials need a `java.net.Authenticator` that nothing installs today. The JDK also blocks Basic auth on HTTPS proxy tunnels by default (`jdk.http.auth.tunneling.disabledSchemes`). |
 | TLS | The JVM's default truststore. `NODE_EXTRA_CA_CERTS` has no effect. `fhir-settings.json` has a `certificateSources` field, but its effect on this path hasn't been checked. |
+
+**Reported in the field, and reproduced.** [vscode-cql#106](https://github.com/cqframework/vscode-cql/issues/106)
+(open, against 0.7.7): a `fhir-settings.json` mirror with `ignoreDefaultPackageServers: true` and
+token auth is ignored, and packages still come from the public registry. Reproduced on 2026-11-10
+against LS 5.0.0 (utilities 6.9.12), both by calling HAPI directly and through the LS with
+cql-mcp. There are two triggers: (1) the mirror doesn't host a package the LS needs. The LS
+always loads `hl7.fhir.r4.core` first, so a registry with only private packages hits this
+straight away. (2) The mirror's tarball URL is outside the configured `url` path, so the token
+isn't sent. In the LS run, `cql_validate` then returned **valid, with no diagnostics**: the LS
+skipped the failed dependencies with a single WARN in its own log. The reproduction scripts are
+the basis for the §6 regression test.
 
 **Who it affects.** vscode-cql starts the same jar and has the same gap. VS Code's proxy settings
 only patch Node inside the extension host, not the JVM it starts.
@@ -57,7 +71,9 @@ cql-mcp writes to its debug log.
 ### 2.2 FHIR registry mirrors and offline use go through HAPI's own settings file
 
 cql-mcp and the LS add **no** settings of their own for FHIR registries. Users configure
-mirrors, credentials and offline mode in `~/.fhir/fhir-settings.json`, the file HAPI's IG
+mirrors, credentials and offline mode in `~/.fhir/fhir-settings.json`. **Caveat:** given HAPI's
+fallback past the mirror (§1), this gives *mirror-first*, not *mirror-only*, behaviour until open
+question 4 is resolved. Mirrors, credentials and offline mode live in the file HAPI's IG
 Publisher and validator already use. That way one file serves every HAPI-based tool. cql-mcp adds
 one optional setting, `CQL_LS_FHIR_SETTINGS`, which it passes as `-Dfhir.settings.path`, for
 users who want a separate file.
@@ -126,6 +142,12 @@ exact mechanism will be designed with Phase 2b.
 2. Does the LS validation path (`cql_test_validate_resources`, feature branch) fetch from
    `tx.fhir.org` or other terminology servers? If so, those requests need the same handling.
 3. Should vscode-cql adopt §2.1/§2.4 in the same release (vscode-cql#94 follow-up)?
+4. **vscode-cql#106: mirror-only behaviour.** The cause is now confirmed (see Context). Decide
+   between (a) an LS-side guard that skips the fallback when `ignoreDefaultPackageServers` is set,
+   for example by pre-resolving through the configured servers with `PackageClient`, and only
+   then calling `loadPackage`; (b) an upstream HAPI change, which should also cover sending
+   credentials to the tarball host; or (c) documenting it. Either way, §2.5 (making failures
+   visible) is needed, because today the user sees a clean validation.
 
 ## 6. Testing
 
