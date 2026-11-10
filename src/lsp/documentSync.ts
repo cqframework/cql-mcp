@@ -54,10 +54,25 @@ function stateFor(client: NotificationSink): SyncState {
 
 const WINDOWS_FORM = /^[A-Za-z]:[\\/]|^\\\\|\\/;
 
-/** A comparison key for a path: forward slashes, no trailing slash, drive letter lower-cased. */
-export function pathKey(p: string): string {
-  let k = WINDOWS_FORM.test(p) ? p.replace(/\\/g, '/') : path.resolve(p);
-  k = k.replace(/\/+$/, '');
+/**
+ * A comparison key for a path: forward slashes, no trailing slash, drive letter lower-cased.
+ *
+ * On a Windows host every input is resolved with win32 rules (so a relative or POSIX-form path
+ * lands on the current drive); elsewhere a Windows-form input is kept as given and anything else
+ * is resolved with POSIX rules. Backslashes are converted afterwards in every case, so the key of
+ * a path and the key of the same path coming back from a `file://` URI always agree.
+ * `platform` and `cwd` are injectable so both host kinds can be tested from any host.
+ */
+export function pathKey(p: string, platform: NodeJS.Platform = process.platform, cwd: string = process.cwd()): string {
+  let k: string;
+  if (platform === 'win32') {
+    k = path.win32.resolve(cwd, p);
+  } else if (WINDOWS_FORM.test(p)) {
+    k = p;
+  } else {
+    k = path.posix.resolve(cwd, p);
+  }
+  k = k.replace(/\\/g, '/').replace(/\/+$/, '');
   if (/^[A-Za-z]:/.test(k)) {
     k = k[0]!.toLowerCase() + k.slice(1);
   }

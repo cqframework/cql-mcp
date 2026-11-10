@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { buildExecuteCqlRequest, modelFor } from '../../../src/tools/executeCqlTool.js';
 import { pathToUri } from '../../../src/workspace/paths.js';
+import { hostFileUri } from '../../helpers/hostPaths.js';
 
 describe('executeCqlTool.buildExecuteCqlRequest', () => {
   it('passes through the caller-supplied libraryVersion', () => {
@@ -21,7 +22,8 @@ describe('executeCqlTool.buildExecuteCqlRequest', () => {
 
   it('uses pathToUri (not URI.file) so Windows-style paths work on POSIX hosts', () => {
     const req = buildExecuteCqlRequest({ cqlFile: '/x/lib.cql' });
-    expect(req.libraries[0]?.libraryUri).to.equal('file:///x');
+    // POSIX-form input: on a Windows host '/x' resolves against the current drive.
+    expect(req.libraries[0]?.libraryUri).to.equal(hostFileUri('/x'));
   });
 
   describe('modelUri', () => {
@@ -86,13 +88,12 @@ describe('executeCqlTool.buildExecuteCqlRequest', () => {
       expect(req.libraries[0]?.model?.modelUri).to.equal(pathToUri(fs.realpathSync(target)));
     });
 
-    it('cross-platform: pathToUri converts a Windows backslash path to file:///C:/... on a POSIX host', () => {
-      if (process.platform === 'win32') return;
+    // Windows-form input is host-independent: the same URI comes back on every host.
+    it('cross-platform: pathToUri converts a Windows backslash path to file:///C:/...', () => {
       expect(pathToUri('C:\\path\\to\\data')).to.equal('file:///C:/path/to/data');
     });
 
-    it('cross-platform: pathToUri converts a Windows forward-slash path to file:///C:/... on a POSIX host', () => {
-      if (process.platform === 'win32') return;
+    it('cross-platform: pathToUri converts a Windows forward-slash path to file:///C:/...', () => {
       expect(pathToUri('C:/path/to/data')).to.equal('file:///C:/path/to/data');
     });
   });
@@ -104,6 +105,7 @@ describe('executeCqlTool.buildExecuteCqlRequest', () => {
     // | Form                  | Test-case folder           | modelUri                   |
     // | --------------------- | -------------------------- | -------------------------- |
     // | macOS / Linux         | /ig/input/tests/L/p1       | file:///ig/input/tests/L/p1 |
+    // | (Windows host, POSIX form: '/ig/...' is relative to the current drive: file:///D:/ig/...)
     // | Windows backslash     | C:\ig\input\tests\L\p1     | file:///C:/ig/input/tests/L/p1 |
     // | Windows forward slash | C:/ig/input/tests/L/p1     | file:///C:/ig/input/tests/L/p1 |
     const fakeFs = { existsSync: () => true, realpathSync: (p: string) => p };
@@ -111,17 +113,15 @@ describe('executeCqlTool.buildExecuteCqlRequest', () => {
     it('builds a FHIR model for a POSIX folder', () => {
       expect(modelFor('/ig/input/tests/L/p1', undefined, fakeFs)).to.deep.equal({
         modelName: 'FHIR',
-        modelUri: 'file:///ig/input/tests/L/p1',
+        modelUri: hostFileUri('/ig/input/tests/L/p1'),
       });
     });
     it('builds a FHIR model for a Windows backslash folder', () => {
-      if (process.platform === 'win32') return;
       expect(modelFor('C:\\ig\\input\\tests\\L\\p1', undefined, fakeFs)?.modelUri).to.equal(
         'file:///C:/ig/input/tests/L/p1',
       );
     });
     it('builds a FHIR model for a Windows forward-slash folder', () => {
-      if (process.platform === 'win32') return;
       expect(modelFor('C:/ig/input/tests/L/p1', undefined, fakeFs)?.modelUri).to.equal(
         'file:///C:/ig/input/tests/L/p1',
       );

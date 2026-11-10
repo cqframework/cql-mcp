@@ -12,7 +12,7 @@ import {
   syncCqlDocument,
   type NotificationSink,
 } from '../../../src/lsp/documentSync.js';
-import { pathToUri } from '../../../src/workspace/paths.js';
+import { pathToUri, uriToPath } from '../../../src/workspace/paths.js';
 
 class FakeClient implements NotificationSink {
   sent: Array<{ method: string; params: any }> = [];
@@ -115,6 +115,54 @@ describe('documentSync', () => {
     it('ignores drive-letter case', () => {
       expect(isUnder('c:\\a\\proj\\X.cql', 'C:\\a\\proj')).to.equal(true);
       expect(pathKey('C:\\a\\b\\')).to.equal('c:/a/b');
+    });
+  });
+
+  describe('pathKey platform table', () => {
+    // pathKey(input, platform, cwd) must give the same key on every host for each row.
+    //
+    // | Input                           | Platform | cwd        | Key                      |
+    // | ------------------------------- | -------- | ---------- | ------------------------ |
+    // | /a/proj/X.cql                   | linux    | /ws        | /a/proj/X.cql            |
+    // | C:\a\proj\X.cql                 | win32    | C:\ws      | c:/a/proj/X.cql          |
+    // | C:/a/proj/X.cql                 | win32    | C:\ws      | c:/a/proj/X.cql          |
+    // | C:\a\proj\X.cql                 | linux    | /ws        | c:/a/proj/X.cql          |
+    // | C:/a/proj/X.cql                 | darwin   | /ws        | c:/a/proj/X.cql          |
+    // | input/cql/X.cql (relative)      | win32    | C:\ws      | c:/ws/input/cql/X.cql    |
+    // | input/cql/X.cql (relative)      | linux    | /ws        | /ws/input/cql/X.cql      |
+    // | /a/proj/X.cql (POSIX form)      | win32    | C:\ws      | c:/a/proj/X.cql          |
+    // | \\\\srv\\share\\X.cql (UNC)     | win32    | C:\ws      | //srv/share/X.cql        |
+    const rows: Array<[string, NodeJS.Platform, string, string]> = [
+      ['/a/proj/X.cql', 'linux', '/ws', '/a/proj/X.cql'],
+      ['C:\\a\\proj\\X.cql', 'win32', 'C:\\ws', 'c:/a/proj/X.cql'],
+      ['C:/a/proj/X.cql', 'win32', 'C:\\ws', 'c:/a/proj/X.cql'],
+      ['C:\\a\\proj\\X.cql', 'linux', '/ws', 'c:/a/proj/X.cql'],
+      ['C:/a/proj/X.cql', 'darwin', '/ws', 'c:/a/proj/X.cql'],
+      ['input/cql/X.cql', 'win32', 'C:\\ws', 'c:/ws/input/cql/X.cql'],
+      ['input/cql/X.cql', 'linux', '/ws', '/ws/input/cql/X.cql'],
+      ['/a/proj/X.cql', 'win32', 'C:\\ws', 'c:/a/proj/X.cql'],
+      ['\\\\srv\\share\\X.cql', 'win32', 'C:\\ws', '//srv/share/X.cql'],
+    ];
+    for (const [input, platform, cwd, expected] of rows) {
+      it(`${JSON.stringify(input)} on ${platform} (cwd ${cwd}) -> ${expected}`, () => {
+        expect(pathKey(input, platform, cwd)).to.equal(expected);
+      });
+    }
+
+    // The bug in one line: a key built from a path must equal the key of the same path coming
+    // back from a file:// URI (which is how incoming diagnostics are keyed). It must hold on the
+    // current host for relative, POSIX-form and Windows-form inputs.
+    const roundTrips = ['input/cql/X.cql', '/a/proj/X.cql', 'C:\\a\\proj\\X.cql', 'C:/a/proj/X.cql'];
+    for (const input of roundTrips) {
+      it(`pathKey(uriToPath(pathToUri(${JSON.stringify(input)}))) equals pathKey(input) on this host`, () => {
+        expect(pathKey(uriToPath(pathToUri(input)))).to.equal(pathKey(input));
+      });
+    }
+
+    it('keys agree for isUnder with a relative file and an absolute folder on this host', () => {
+      const rel = path.join('input', 'cql', 'X.cql');
+      expect(isUnder(rel, process.cwd())).to.equal(true);
+      expect(isUnder(path.resolve(rel), process.cwd())).to.equal(true);
     });
   });
 

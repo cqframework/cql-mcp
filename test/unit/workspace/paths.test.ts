@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { cacheJarDir, joinLike, libraryNameOf, pathToUri, runStoreDir, uriToPath } from '../../../src/workspace/paths.js';
+import { hostFileUri, hostPath, isWin } from '../../helpers/hostPaths.js';
 
 describe('workspace/paths', () => {
   describe('cacheJarDir', () => {
@@ -42,14 +43,19 @@ describe('workspace/paths', () => {
   });
 
   describe('pathToUri / uriToPath', () => {
-    // Cross-platform table. Expected URI and round-trip path per input format,
-    // independent of the host platform:
+    // Cross-platform table. Expected URI and round-trip path per input format. Windows-form
+    // input gives the same result on every host. POSIX-form input on a Windows host resolves
+    // against the current drive ('/a/b.cql' -> file:///D:/a/b.cql, round-trip D:\a\b.cql):
     //   input                      uri                           path (round-trip)
     //   macOS/Linux '/a/b.cql'     file:///a/b.cql               /a/b.cql
     //   Windows '\' 'C:\a\b.cql'   file:///C:/a/b.cql            C:\a\b.cql
     //   Windows '/' 'C:/a/b.cql'   file:///C:/a/b.cql            C:\a\b.cql
     const cases: Array<[string, string, string]> = [
-      ['/Users/a/projects/measure.cql', 'file:///Users/a/projects/measure.cql', '/Users/a/projects/measure.cql'],
+      [
+        '/Users/a/projects/measure.cql',
+        hostFileUri('/Users/a/projects/measure.cql'),
+        hostPath('/Users/a/projects/measure.cql'),
+      ],
       ['C:\\Users\\a\\measure.cql', 'file:///C:/Users/a/measure.cql', 'C:\\Users\\a\\measure.cql'],
       ['C:/Users/a/measure.cql', 'file:///C:/Users/a/measure.cql', 'C:\\Users\\a\\measure.cql'],
       ['C:\\projects\\dir', 'file:///C:/projects/dir', 'C:\\projects\\dir'],
@@ -82,7 +88,10 @@ describe('workspace/paths', () => {
 
   describe('runStoreDir', () => {
     it('places runs under <root>/.cql-debug/test-runs', () => {
-      expect(runStoreDir('/work/project')).to.equal('/work/project/.cql-debug/test-runs');
+      // POSIX form: path.join on a Windows host yields backslashes (and no drive is added).
+      expect(runStoreDir('/work/project')).to.equal(
+        isWin ? '\\work\\project\\.cql-debug\\test-runs' : '/work/project/.cql-debug/test-runs',
+      );
     });
     it('handles a Windows backslash root', () => {
       expect(runStoreDir('C:\\work\\project')).to.equal('C:\\work\\project\\.cql-debug\\test-runs');
