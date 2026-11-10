@@ -33,7 +33,7 @@ function findJar(): string | null {
 
 const projectRoot = process.cwd();
 const LOGBACK_FILE =
-  process.env.CQL_DEBUG_MCP_LOGBACK_FILE ??
+  process.env.CQL_MCP_LOGBACK_FILE ??
   path.resolve(projectRoot, '..', 'cql-language-server', 'ls', 'server', 'src', 'main', 'resources', 'logback.xml');
 
 // A minimal IG in the IG Publisher default layout (path-binary = input/cql): ig.ini plus an

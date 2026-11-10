@@ -25,7 +25,7 @@ function findJar(): string | null {
 
 const projectRoot = process.cwd();
 const LOGBACK_FILE =
-  process.env.CQL_DEBUG_MCP_LOGBACK_FILE ??
+  process.env.CQL_MCP_LOGBACK_FILE ??
   path.resolve(projectRoot, '..', 'cql-language-server', 'ls', 'server', 'src', 'main', 'resources', 'logback.xml');
 
 function values(response: { results: Array<{ expressions: Array<{ name: string; value: string }> }> }) {

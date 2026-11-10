@@ -38,7 +38,7 @@ class McpChild {
 
   constructor(jar: string, workspace: string) {
     this.child = spawn(process.execPath, [entry], {
-      env: { ...process.env, CQL_LS_JAR_PATH: jar, CQL_DEBUG_MCP_WORKSPACE: workspace },
+      env: { ...process.env, CQL_LS_JAR_PATH: jar, CQL_MCP_WORKSPACE: workspace },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.exit = new Promise((resolve) => this.child.once('exit', (code, signal) => resolve({ code, signal })));

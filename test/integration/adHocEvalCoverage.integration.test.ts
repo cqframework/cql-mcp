@@ -30,7 +30,7 @@ const fixtureDir = path.join(projectRoot, 'test', 'fixtures', 'ad-hoc-eval');
 const fixture = (name: string): string => path.join(fixtureDir, name);
 
 const LOGBACK_FILE =
-  process.env.CQL_DEBUG_MCP_LOGBACK_FILE ??
+  process.env.CQL_MCP_LOGBACK_FILE ??
   path.resolve(
     projectRoot,
     '..',
@@ -49,7 +49,7 @@ function newProcess(java: { javaPath: string }, jar: string, workspacePath: stri
     jarPath: jar,
     workspacePath,
     logbackConfigFile: LOGBACK_FILE,
-    logFile: process.env.CQL_DEBUG_MCP_LOG_FILE,
+    logFile: process.env.CQL_MCP_LOG_FILE,
   });
 }
 

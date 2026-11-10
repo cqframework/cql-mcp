@@ -8,39 +8,37 @@ rows. The authoritative matrix (row → Tier A test → Tier B step) is
 ## Fixtures
 
 Copied 1:1 from `cql-language-server/ls/server/src/test/resources/org/opencds/cqf/cql/ls/server/`
-into `mcp-cql-debug/test/fixtures/ad-hoc-eval/`:
+into `cql-mcp/test/fixtures/ad-hoc-eval/`:
 
 `AdHocQueryBasics.cql`, `AdHocTerminology.cql`, `AdHocOperandTypes.cql`, `AdHocFhirQuery.cql`,
 `AdHocVitalSigns.cql`, `AdHocIncludingLib.cql`, `AdHocIncludedLib.cql`
 
 **Keep the copies in sync** when the LS-side fixtures change (the automated test loads them from
-the mcp-cql-debug dir). `AdHocTerminology.cql` deliberately keeps its defines in sorted-by-name
+the cql-mcp dir). `AdHocTerminology.cql` deliberately keeps its defines in sorted-by-name
 order — see matrix gap 3.
 
 ## Prerequisites
 
 - Node ≥ 18, and a JVM (any JDK 17+ the debug server runs on).
 - The `cql-ls-server` JAR the MCP server will spawn. `findJar()` (in the test) prefers
-  `CQL_LS_JAR_PATH`, then scans `vscode-cql/dist/java-support/jars/` →
-  `mcp-cql-debug/dist/java-support/jars/` for `cql-ls-server-*.jar`.
+  `CQL_LS_JAR_PATH`, then scans `../vscode-cql/dist/java-support/jars/` (a `vscode-cql` checkout
+  next to this repo) → `dist/java-support/jars/` (in this repo) for `cql-ls-server-*.jar`.
 
 Getting a JAR (pick one):
 
-1. **Reuse the shipped one** — `vscode-cql/dist/java-support/jars/cql-ls-server-4.11.0-SNAPSHOT.jar`
-   already present from a previous packaging run; the test finds it with no env vars. Verify it is
+1. **Reuse one from a sibling vscode-cql checkout**: `vscode-cql/dist/java-support/jars/cql-ls-server-<version>.jar`,
+   already present after a vscode-cql packaging run; the test finds it with no env vars. Verify it is
    not older than the debug-server sources you care about:
    `ls -la vscode-cql/dist/java-support/jars/` vs
    `ls -la cql-language-server/ls/server/src/main/kotlin/org/opencds/cqf/cql/debug/CqlDebugServer.kt`.
-2. **Point at a fresh build** — from `_repo/cql-language-server/` run
+2. **Point at a fresh build**: from a `cql-language-server` checkout run
    `./mvnw package -DskipTests`; the fat JAR lands at
-   `ls/server/target/cql-ls-server-<version>-SNAPSHOT.jar`; then
-   `export CQL_LS_JAR_PATH="$PWD/ls/server/target/cql-ls-server-4.11.0-SNAPSHOT.jar"`.
-3. **Interactive packaging** — `_repo/.scripts/package.sh` (builds the LS, bundles the JAR into a
-   VSIX, and copies it into `vscode-cql/dist/java-support/jars/`).
+   `ls/server/target/cql-ls-server-<version>.jar`; then
+   `export CQL_LS_JAR_PATH="$PWD/ls/server/target/cql-ls-server-<version>.jar"`.
 
 ## Running
 
-From `_repo/mcp-cql-debug/`:
+From the repo root:
 
 ```sh
 npm run test:integration -- --grep adHocEvalCoverage
@@ -97,7 +95,7 @@ Anything the automated file can't reach but the debugger supports can be chased 
 (`cql_debug_start` / `cql_debug_continue` / `cql_debug_evaluate` with a frameId):
 
 1. **Included-library probe (the frame TB-18 can't reach)**: launch `AdHocIncludingLib.cql` with
-   `rootDir=mcp-cql-debug/test/fixtures/ad-hoc-eval`, break at `AdHocIncludedLib.cql:8` (alias `T`
+   `rootDir=cql-mcp/test/fixtures/ad-hoc-eval`, break at `AdHocIncludedLib.cql:8` (alias `T`
    of "Tuple Alias Query" — Tuple-typed). Evaluate both `T.id > 0` (bare key) and
    `AdHocIncludedLib.T.id > 0` (qualified) to observe which key the live registry uses. The
    qualified key is the one that hits `noResolvableTypeResponse`

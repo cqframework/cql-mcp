@@ -34,7 +34,7 @@ const fixture = (name: string) => path.join(projectRoot, 'test', 'fixtures', nam
 // writes logback status to stdout before the first LSP frame. Point the JVM at
 // the fixed source config so the LSP channel stays clean.
 const LOGBACK_FILE =
-  process.env.CQL_DEBUG_MCP_LOGBACK_FILE ??
+  process.env.CQL_MCP_LOGBACK_FILE ??
   path.resolve(projectRoot, '..', 'cql-language-server', 'ls', 'server', 'src', 'main', 'resources', 'logback.xml');
 
 function newProcess(java: { javaPath: string }, jar: string, workspacePath: string): CqlLsProcess {

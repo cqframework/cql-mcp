@@ -37,7 +37,7 @@ const projectRoot = process.cwd();
 const fixture = (name: string) => path.join(projectRoot, 'test', 'fixtures', name);
 
 const LOGBACK_FILE =
-  process.env.CQL_DEBUG_MCP_LOGBACK_FILE ??
+  process.env.CQL_MCP_LOGBACK_FILE ??
   path.resolve(projectRoot, '..', 'cql-language-server', 'ls', 'server', 'src', 'main', 'resources', 'logback.xml');
 
 describe('staticInference integration (real JVM)', () => {

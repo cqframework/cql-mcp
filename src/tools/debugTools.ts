@@ -5,7 +5,7 @@ import type { McpContext, Tool } from './defs.js';
 
 /**
  * Warning for language servers released before the DebugSession socket-close fix
- * (cql-language-server bf40a031, 2026-09-17; in 4.11.0-SNAPSHOT builds, in no release yet). Without
+ * (cql-language-server bf40a031, 2026-09-17; first released in 5.0.0). Without
  * it a request made after a session has ended hangs. Null for newer or unparseable versions.
  */
 export function debugVersionWarning(version: string | null | undefined): string | null {

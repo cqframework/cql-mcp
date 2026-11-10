@@ -1,19 +1,40 @@
 {
-  "name": "mcp-cql-debug",
+  "name": "@cqframework/cql-mcp",
   "version": "0.1.0",
   "description": "Standalone MCP server for HL7 CQL: execution, ELM inspection, DAP step-through debugging, and headless test runs against the cql-language-server JVM",
-  "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cqframework/cql-mcp.git"
+  },
+  "homepage": "https://github.com/cqframework/cql-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/cqframework/cql-mcp/issues"
+  },
+  "keywords": [
+    "cql",
+    "clinical-quality-language",
+    "mcp",
+    "model-context-protocol",
+    "fhir",
+    "dap",
+    "debugger"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "main": "dist/src/index.js",
   "bin": {
-    "mcp-cql-debug": "dist/src/index.js"
+    "cql-mcp": "dist/src/index.js"
   },
   "files": [
     "dist/src",
     "scripts/smoke.sh",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -27,7 +48,7 @@
     "prepack": "npm run compile"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@vscode/debugprotocol": "1.68.0",
     "jsonc-parser": "3.3.1",
     "vscode-jsonrpc": "9.0.2",
@@ -39,7 +60,7 @@
     "@types/mocha": "10.0.10",
     "@types/node": "22.20.2",
     "chai": "4.5.0",
-    "mocha": "11.7.5",
+    "mocha": "12.0.3",
     "source-map-support": "0.5.21",
     "typescript": "5.9.3"
   }

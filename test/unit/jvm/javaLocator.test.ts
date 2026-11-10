@@ -70,7 +70,7 @@ describe('jvm/javaLocator', () => {
   describe('findJavaRuntime', () => {
     // Only exercised when a real JDK >= 17 exists on this machine.
     it('detects the real JDK when present (integration-gated)', function () {
-      if (process.env.CQL_DEBUG_MCP_SKIP_JAVA) {
+      if (process.env.CQL_MCP_SKIP_JAVA) {
         this.skip();
       }
       const runtime = findJavaRuntime(process.env.JAVA_HOME);

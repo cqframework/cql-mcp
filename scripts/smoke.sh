@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke-test the mcp-cql-debug MCP server. Drives stdio JSON-RPC NDJSON
+# Smoke-test the cql-mcp MCP server. Drives stdio JSON-RPC NDJSON
 # requests against the canonical entry dist/src/index.js (per
 # package.json:bin). Output is captured at /tmp/mcp-smoke.stdout and
 # /tmp/mcp-smoke.stderr.
@@ -24,6 +24,6 @@ JAR="$3"
   sleep 2
   echo '{"jsonrpc":"2.0","id":99,"method":"shutdown"}'
   sleep 1
-) | CQL_LS_JAR_PATH="$JAR" CQL_DEBUG_MCP_WORKSPACE="$WORKSPACE" CQL_DEBUG_MCP_LOG_FILE=/tmp/mcp-smoke.log \
+) | CQL_LS_JAR_PATH="$JAR" CQL_MCP_WORKSPACE="$WORKSPACE" CQL_MCP_LOG_FILE=/tmp/mcp-smoke.log \
     node "$MCP_DIR/dist/src/index.js" \
     > /tmp/mcp-smoke.stdout 2> /tmp/mcp-smoke.stderr

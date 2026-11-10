@@ -188,7 +188,7 @@ export class DapSession {
     this.trackState(client, state);
     try {
       await client.send('initialize', {
-        clientID: 'mcp-cql-debug',
+        clientID: 'cql-mcp',
         adapterID: 'cql-ls',
         locale: 'en-US',
         linesStartAt1: true,

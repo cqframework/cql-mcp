@@ -1,10 +1,36 @@
-# mcp-cql-debug
+# cql-mcp
 
 Standalone MCP server for HL7 CQL: execution, ELM inspection, DAP step-through debugging, and headless test runs against the cql-language-server JVM.
 
 ## Status
 
 All 19 tools are implemented: static inference and semantic analysis, lifecycle and inspection, DAP step-through debugging, and the test pipeline (persisted run history and diff). Run `npm test` for the current unit and integration results.
+
+## Install and configure
+
+```sh
+npx -y @cqframework/cql-mcp
+```
+
+Claude Code:
+
+```sh
+claude mcp add cql-mcp -- npx -y @cqframework/cql-mcp
+```
+
+Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "cql-mcp": {
+      "command": "npx",
+      "args": ["-y", "@cqframework/cql-mcp"],
+      "env": { "CQL_MCP_WORKSPACE": "/path/to/your/cql/project" }
+    }
+  }
+}
+```
 
 ## Quick start
 
@@ -42,12 +68,16 @@ Drives `initialize`, `tools/list`, a `cql_test_run_file` invocation, and a `cql_
 | Var | Default | Purpose |
 |---|---|---|
 | `CQL_LS_JAR_PATH` | (download from Maven Central) | Path to a pre-built `cql-ls-server-*.jar`. Bypasses download. |
-| `CQL_LS_VERSION` | `4.10.0` | Maven version to download if no local jar. 4.10.0 is the latest release, but it predates the LS DebugSession socket-close fix (`bf40a031`, 2026-09-17); for debugging, set `CQL_LS_JAR_PATH` to a current 4.11.0-SNAPSHOT build. `cql_debug_start` warns when the LS is older. |
+| `CQL_LS_VERSION` | `5.0.0` | Maven version to download if no local jar. 5.0.0 is the first release with the LS DebugSession socket-close fix (`bf40a031`, 2026-09-17); `cql_debug_start` warns when the LS is older. |
 | `CQL_LS_MAVEN_REPO` | Maven Central | Maven base URL for jar download. |
-| `CQL_DEBUG_MCP_JAR_DIR` | `~/.cql-debug-mcp/jars` | Where downloaded jars are cached. |
-| `CQL_DEBUG_MCP_WORKSPACE` | `process.cwd()` | Workspace root under which `.cql-debug/test-runs/` is stored. |
-| `CQL_DEBUG_MCP_LOG_FILE` | (stderr only) | Path to a structured log file (stderr stays clean). |
-| `CQL_DEBUG_MCP_LOG_LEVEL` | `info` | One of `debug`, `info`, `warn`, `error`. |
+| `CQL_MCP_JAR_DIR` | `~/.cql-mcp/jars` | Where downloaded jars are cached. |
+| `CQL_MCP_WORKSPACE` | `process.cwd()` | Workspace root under which `.cql-debug/test-runs/` is stored. |
+| `CQL_MCP_LOG_FILE` | (stderr only) | Path to a structured log file (stderr stays clean). |
+| `CQL_MCP_LOG_LEVEL` | `info` | One of `debug`, `info`, `warn`, `error`. |
+
+The previous names `CQL_DEBUG_MCP_JAR_DIR`, `CQL_DEBUG_MCP_WORKSPACE`, `CQL_DEBUG_MCP_LOG_FILE` and `CQL_DEBUG_MCP_LOG_LEVEL` are still accepted and log one deprecation warning per process; the new name wins when both are set. When `CQL_MCP_JAR_DIR` is unset, a valid jar in the legacy cache `~/.cql-debug-mcp/jars` is used in place.
+
+The on-disk run history folder `.cql-debug/test-runs/` keeps its legacy name for compatibility, so existing run history still diffs.
 
 Java is discovered via `JAVA_HOME` then `PATH`; needs JDK >= 17.
 
@@ -125,7 +155,7 @@ Run records and per-suite pointers are stored under `<workspaceRoot>/.cql-debug/
 
 ```sh
 .cql-debug/test-runs/
-  <fs-safe-ISO-timestamp>-<hash8>.json    # RunRecord (one per saveRun)
+  <fs-safe-ISO-timestamp>-<hash8>.json     # RunRecord (one per saveRun)
   latest-<sanitized-suite>.json            # Pointer: { hash }
   previous-<sanitized-suite>.json          # Pointer: { hash }
 ```
@@ -138,11 +168,11 @@ Filenames use `fsSafeTimestamp` (strips `:` and `.`) so the same paths work on m
 - **Shutdown:** the server stops its LS JVM and exits when the client closes stdin (the SDK's stdio transport does not report this itself), and on SIGINT/SIGTERM. Shutdown is bounded: 3 s for the LS to answer `shutdown`, then SIGTERM/SIGKILL, and 15 s overall.
 - **LSP/DAP pipes:** JVM stdout is pure LSP framing on its own pipe (read by `vscode-jsonrpc`). DAP uses Content-Length framing on a TCP socket per debug session.
 - **Asymmetry:** `cql_execute` `libraryUri` is the parent dir of the .cql file; DAP `launch` `libraryUri` is the .cql file itself. `cql_debug_start` computes both internally — callers pass the .cql file once.
-- **Repository:** This project has its own git repository. It is not part of the `vscode-cql` or `cql-language-server` repos.
+- **Repository:** [cqframework/cql-mcp](https://github.com/cqframework/cql-mcp). It is a standalone project, separate from [cqframework/vscode-cql](https://github.com/cqframework/vscode-cql) and [cqframework/cql-language-server](https://github.com/cqframework/cql-language-server); it drives the language server jar but does not build it.
 
 ## Prompting agents
 
-Once the MCP is wired into an agent (opencode, Claude Desktop, or any MCP-aware client), the agent sees the 16 `cql_*` tools directly. The prompts below are minimal-context — they point at file paths and let the agent investigate. Each template is a copy-paste block with placeholders you fill in for your measure.
+Once the MCP is wired into an agent (opencode, Claude Desktop, or any MCP-aware client), the agent sees the 19 `cql_*` tools directly. The prompts below are minimal-context — they point at file paths and let the agent investigate. Each template is a copy-paste block with placeholders you fill in for your measure.
 
 ### Tool-selection cheatsheet
 
@@ -169,7 +199,7 @@ Always end a DAP session with `cql_debug_stop`. Always call `cql_get_status` fir
 
 ```text
 Run the CQL at <CQL_FILE> against every patient bundle under <TESTS_DIR>/measure/<SUITE_NAME>/
-using the mcp-cql-debug tools. Compare each run's per-define results against
+using the cql-mcp tools. Compare each run's per-define results against
 the matching TestCaseResult-*.json in <TESTS_DIR>/results/<SUITE_NAME>/.
 Report every patient where any define disagrees with the expected value,
 quoting actual vs. expected. Group mismatches by which define disagrees so
@@ -186,7 +216,7 @@ run shows false. The bundle is at <TESTS_DIR>/measure/<SUITE_NAME>/<PATIENT_UUID
 and the expected results at <TESTS_DIR>/results/<SUITE_NAME>/TestCaseResult-<PATIENT_UUID>.json.
 The CQL is <CQL_FILE>.
 
-Use mcp-cql-debug to figure out which sub-clause of <POPULATION> fails first.
+Use cql-mcp to figure out which sub-clause of <POPULATION> fails first.
 Use cql_debug_start, cql_debug_set_breakpoints, cql_debug_continue,
 cql_debug_next / cql_debug_step_in / cql_debug_step_out, cql_debug_get_variables,
 and cql_debug_evaluate to trace. End with cql_debug_stop.
@@ -202,7 +232,7 @@ I built a patient bundle under <TESTS_DIR>/measure/<SUITE_NAME>/<PATIENT_UUID>/
 that should put this patient in <POPULATION> but the run shows false. The CQL
 is <CQL_FILE>.
 
-Use mcp-cql-debug to:
+Use cql-mcp to:
   1. Run the CQL against the patient and get the actual per-define values.
   2. For each define in the <POPULATION> path, call cql_debug_evaluate with
      the expression text from the CQL source and report what the engine returns.
@@ -217,7 +247,7 @@ or missing.
 
 ```text
 I just edited <CQL_FILE>. There should be two persisted runs under suite
-<SUITE_NAME> — use mcp-cql-debug's cql_test_list_runs to find them and then
+<SUITE_NAME> — use cql-mcp's cql_test_list_runs to find them and then
 cql_test_diff with runA="previous" and runB="latest".
 
 For every entry in the diff's "changed" array, tell me in one sentence what
@@ -228,7 +258,7 @@ or kind="expression-removed" — those are likely renames in the CQL source.
 ### Scenario 5 — compile inspection
 
 ```text
-Show me the ELM for <CQL_FILE> using mcp-cql-debug's cql_view_elm with
+Show me the ELM for <CQL_FILE> using cql-mcp's cql_view_elm with
 elmType="ast". I want to verify that <RETRIEVE_EXPRESSION> compiles to a
 ValueSetRef against <EXPECTED_VALUESET_URL> and that <FLUENT_FUNCTION>
 is inlined correctly.
@@ -265,33 +295,36 @@ point. End with cql_debug_stop.
 - Always tell the agent to call `cql_debug_stop` at the end. DAP sessions leak file descriptors otherwise.
 - For CQL with parameters, pass `Measurement Period` explicitly in the prompt. The MCP defaults to whatever the CQL declares; if you are debugging against a non-default period, say so.
 - For multi-step investigations, ask for a final summary in the same turn. Otherwise the agent can loop on tool calls without converging.
-- If the agent has access to `mcp-cql-debug` plus other read-only tools (Read, Grep, Glob), it will often read the CQL source first to find the line numbers for breakpoints. Encourage this by pointing it at the file path.
+- If the agent has access to `cql-mcp` plus other read-only tools (Read, Grep, Glob), it will often read the CQL source first to find the line numbers for breakpoints. Encourage this by pointing it at the file path.
 
 ### Gotchas
 
 - **LSP channel corrupted at startup.** The LS JVM's stdout is the LSP channel, so anything it prints there before the first LSP frame (for example logback status messages from a broken bundled `logback.xml`) corrupts it and `initialize` fails or hangs. Force a known-good config with `-Dlogback.configurationFile=<path>`; the integration tests do this via `CqlLsProcess`'s `logbackConfigFile` option.
-- **Tool names differ by client.** opencode exposes tools as `cql_*`. Claude Desktop prefixes with `mcp__mcp-cql-debug__cql_*`. Same prompts work for both; just be aware if you see tool names in logs.
+- **Tool names differ by client.** opencode exposes tools as `cql_*`. Claude Code shows `mcp__<server-key>__cql_*`, where `<server-key>` is the name you registered the server under in your MCP config (for example `mcp__cql-mcp__cql_execute` for a server registered as `cql-mcp`). Same prompts work for both; just be aware if you see tool names in logs.
 - **`cql_test_run_suite` requires Layout A.** The discovery walks `<suiteRoot>/<suiteName>/<patient-uuid>/`. If your measure stores bundles elsewhere, fall back to looping `cql_test_run_file` over each patient ID.
-- **Workspace root.** `CQL_DEBUG_MCP_WORKSPACE` defaults to `process.cwd()` of the MCP server, not your project. Set it explicitly in the MCP config so `.cql-debug/test-runs/` lands where you expect.
+- **Workspace root.** `CQL_MCP_WORKSPACE` defaults to `process.cwd()` of the MCP server, not your project. Set it explicitly in the MCP config so `.cql-debug/test-runs/` lands where you expect.
 - **DAP `libraryVersion` is automatic.** `cql_debug_start` extracts the version from the CQL header. Don't pass it explicitly.
 - **Breakpoints go on expression lines.** The LS only stops on expression lines, never on a `define "X":` line. `cql_debug_set_breakpoints` may still answer `verified: true` for a `define` line; the LS marks it unverified later. When a resume terminates without stopping although breakpoints were set, the result carries a `note`, the `unverifiedBreakpoints`, and `errors` from re-running the library with the launch settings.
 
 ### Worked example for CMS645
 
-If you point an agent at the real CMS645 measure in `<IG_ROOT>`:
+If you point an agent at the CMS645 measure in a content IG at `<IG_ROOT>`:
 
 ```text
 Run the CQL at <IG_ROOT>/input/cql/CMS645FHIRBoneDensityPCADTherapy.cql
 against every patient bundle under
 <IG_ROOT>/input/tests/measure/CMS645FHIRBoneDensityPCADTherapy/
-using the mcp-cql-debug tools. Compare each run's per-define results against
+using the cql-mcp tools. Compare each run's per-define results against
 the matching TestCaseResult-*.json in
 <IG_ROOT>/input/tests/results/CMS645FHIRBoneDensityPCADTherapy/.
 Report every patient where any define disagrees with the expected value,
 quoting actual vs. expected. Group mismatches by which define disagrees.
 ```
 
-## Related plans
+## Design decisions
 
-- Kotlin migration plus Spring Boot removal — applies to `cql-language-server`, not this dir; write-up lives in the workspace-root `CLAUDE.md` under "Historical: Kotlin Migration + Spring Boot Removal"
-- Hybrid ANTLR hover architecture — applies to `cql-language-server`, not this dir
+Architecture decision records live in [`docs/adr/`](docs/adr/).
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
