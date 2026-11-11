@@ -9,52 +9,127 @@ All 19 tools are implemented: static inference and semantic analysis, lifecycle 
 ## Install and configure
 
 Requires Node.js 22+ and a JDK 17+ (found through `JAVA_HOME`, then `PATH`). The
-cql-language-server jar is downloaded on first use; see [Restricted networks](#restricted-networks).
+cql-language-server jar is resolved on first use: if vscode-cql is installed with the same
+language server version, its jar is copied, otherwise it's downloaded from Maven. See
+[Restricted networks](#restricted-networks).
 
-### From a GitHub release (current)
+cql-mcp is a local stdio server: the client starts it as a command on the same machine. The
+**workspace** is your CQL project root. It's the server's working directory unless
+`CQL_MCP_WORKSPACE` is set.
+
+### The launch command
 
 The npm package isn't published yet. Until it is, each
 [GitHub release](https://github.com/cqframework/cql-mcp/releases) has the package tarball
-attached. Run it with `npx` from its URL. Replace `<version>` with the release version, for
-example `0.1.0-rc.1`:
+attached, and `npx` runs it from its URL:
 
 ```sh
-npx -y --package=https://github.com/cqframework/cql-mcp/releases/download/v<version>/cqframework-cql-mcp-<version>.tgz cql-mcp
+npx -y --package=<tarball-url> cql-mcp
 ```
 
-The `--package=… cql-mcp` form is required: `npx` doesn't run a tarball URL given on its own.
+where `<tarball-url>` is
+`https://github.com/cqframework/cql-mcp/releases/download/v<version>/cqframework-cql-mcp-<version>.tgz`,
+for example with `<version>` set to `0.1.0-rc.1`. The `--package=… cql-mcp` form is required:
+`npx` doesn't run a tarball URL given on its own. To upgrade, change `<version>` to a newer release.
 
-Claude Code (run from your CQL project directory, which becomes the workspace):
+Once the npm package is published, the launch command becomes `npx -y @cqframework/cql-mcp`.
+
+The first start downloads the package, which can take longer than some clients wait for a
+server to start. If a client reports a startup timeout, start it again, or raise its timeout.
+
+### Claude Code (terminal, IDE extensions and desktop app)
+
+Run this from your CQL project directory:
 
 ```sh
-claude mcp add cql-mcp -- npx -y --package=https://github.com/cqframework/cql-mcp/releases/download/v<version>/cqframework-cql-mcp-<version>.tgz cql-mcp
+claude mcp add cql-mcp -- npx -y --package=<tarball-url> cql-mcp
 ```
 
-Claude Desktop (`claude_desktop_config.json`):
+This uses the default `local` scope: the server is available only in that project. To make it
+available in every project, add `--scope user` before `cql-mcp`. The workspace is the directory
+you start Claude Code from. The `claude` CLI, the Claude Code VS Code and JetBrains extensions,
+and the Claude Code desktop app all share this configuration.
+
+### Claude Desktop (chat app)
+
+The Claude chat app for macOS and Windows has no project directory, so set the workspace in
+`claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "cql-mcp": {
       "command": "npx",
-      "args": [
-        "-y",
-        "--package=https://github.com/cqframework/cql-mcp/releases/download/v<version>/cqframework-cql-mcp-<version>.tgz",
-        "cql-mcp"
-      ],
+      "args": ["-y", "--package=<tarball-url>", "cql-mcp"],
       "env": { "CQL_MCP_WORKSPACE": "/path/to/your/cql/project" }
     }
   }
 }
 ```
 
-To upgrade, change `<version>` to the newer release.
+### VS Code (GitHub Copilot)
 
-### From npm (once published)
+Add the server to the Copilot user configuration, `~/.copilot/mcp-config.json` (or
+`$COPILOT_HOME/mcp-config.json`), or use the **MCP: Add Server** command:
+
+```json
+{
+  "mcpServers": {
+    "cql-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "--package=<tarball-url>", "cql-mcp"],
+      "env": { "CQL_MCP_WORKSPACE": "/path/to/your/cql/project" }
+    }
+  }
+}
+```
+
+This is a user-level configuration, so `CQL_MCP_WORKSPACE` points it at one project. The older
+`.vscode/mcp.json` format (top-level key `servers`) still works and defaults the working
+directory to the workspace folder, but VS Code has deprecated it. vscode-cql isn't required.
+If it's installed with the same language server version, cql-mcp reuses its jar.
+
+### OpenCode
+
+Run this from your CQL project directory:
 
 ```sh
-claude mcp add cql-mcp -- npx -y @cqframework/cql-mcp
+opencode mcp add cql-mcp -- npx -y --package=<tarball-url> cql-mcp
 ```
+
+This writes `opencode.json` in the project. To add it by hand, use the v2 format, where
+servers sit under `mcp.servers`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "cql-mcp": {
+        "type": "local",
+        "command": ["npx", "-y", "--package=<tarball-url>", "cql-mcp"]
+      }
+    }
+  }
+}
+```
+
+OpenCode starts local servers in the workspace by default. To point at a different project, add
+`"environment": { "CQL_MCP_WORKSPACE": "/path/to/your/cql/project" }`.
+
+### ChatGPT
+
+The ChatGPT desktop app can run local servers: add one in its MCP settings, choose **STDIO**, and
+enter the launch command, `npx -y --package=<tarball-url> cql-mcp`. Set `CQL_MCP_WORKSPACE` to your
+CQL project. **ChatGPT on the web can't use cql-mcp.** It only supports remote MCP servers, and
+cql-mcp runs locally next to your project files.
+
+### Other MCP clients
+
+Any client that can start a stdio MCP server works. Use `npx` as the command,
+`["-y", "--package=<tarball-url>", "cql-mcp"]` as the arguments, and set `CQL_MCP_WORKSPACE`, or
+the working directory, to your CQL project.
 
 ### From source
 
@@ -63,10 +138,10 @@ git clone https://github.com/cqframework/cql-mcp.git
 cd cql-mcp
 npm ci
 npm run build
-claude mcp add cql-mcp -- node "$PWD/dist/src/index.js"
 ```
 
-Run `git pull && npm run build` to update.
+Then use `node /path/to/cql-mcp/dist/src/index.js` as the launch command in any of the
+configurations above. Run `git pull && npm run build` to update.
 
 ## Quick start
 
