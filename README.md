@@ -1,6 +1,6 @@
 # cql-mcp
 
-Standalone MCP server for HL7 CQL: execution, ELM inspection, DAP step-through debugging, and headless test runs against the cql-language-server JVM.
+Standalone MCP server for HL7 CQL: execution, ELM inspection, DAP step-through debugging, and headless test runs against the [CQL Language Server](https://github.com/cqframework/cql-language-server) JVM.
 
 ## Status
 
@@ -8,14 +8,26 @@ All 19 tools are implemented: static inference and semantic analysis, lifecycle 
 
 ## Install and configure
 
+Requires Node.js 22+ and a JDK 17+ (found through `JAVA_HOME`, then `PATH`). The
+cql-language-server jar is downloaded on first use; see [Restricted networks](#restricted-networks).
+
+### From a GitHub release (current)
+
+The npm package isn't published yet. Until it is, each
+[GitHub release](https://github.com/cqframework/cql-mcp/releases) has the package tarball
+attached. Run it with `npx` from its URL. Replace `<version>` with the release version, for
+example `0.1.0-rc.1`:
+
 ```sh
-npx -y @cqframework/cql-mcp
+npx -y --package=https://github.com/cqframework/cql-mcp/releases/download/v<version>/cqframework-cql-mcp-<version>.tgz cql-mcp
 ```
 
-Claude Code:
+The `--package=… cql-mcp` form is required: `npx` doesn't run a tarball URL given on its own.
+
+Claude Code (run from your CQL project directory, which becomes the workspace):
 
 ```sh
-claude mcp add cql-mcp -- npx -y @cqframework/cql-mcp
+claude mcp add cql-mcp -- npx -y --package=https://github.com/cqframework/cql-mcp/releases/download/v<version>/cqframework-cql-mcp-<version>.tgz cql-mcp
 ```
 
 Claude Desktop (`claude_desktop_config.json`):
@@ -25,12 +37,36 @@ Claude Desktop (`claude_desktop_config.json`):
   "mcpServers": {
     "cql-mcp": {
       "command": "npx",
-      "args": ["-y", "@cqframework/cql-mcp"],
+      "args": [
+        "-y",
+        "--package=https://github.com/cqframework/cql-mcp/releases/download/v<version>/cqframework-cql-mcp-<version>.tgz",
+        "cql-mcp"
+      ],
       "env": { "CQL_MCP_WORKSPACE": "/path/to/your/cql/project" }
     }
   }
 }
 ```
+
+To upgrade, change `<version>` to the newer release.
+
+### From npm (once published)
+
+```sh
+claude mcp add cql-mcp -- npx -y @cqframework/cql-mcp
+```
+
+### From source
+
+```sh
+git clone https://github.com/cqframework/cql-mcp.git
+cd cql-mcp
+npm ci
+npm run build
+claude mcp add cql-mcp -- node "$PWD/dist/src/index.js"
+```
+
+Run `git pull && npm run build` to update.
 
 ## Quick start
 
