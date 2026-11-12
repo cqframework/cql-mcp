@@ -1,6 +1,6 @@
 {
   "name": "@cqframework/cql-mcp",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-rc.2",
   "description": "Standalone MCP server for HL7 CQL: execution, ELM inspection, DAP step-through debugging, and headless test runs against the cql-language-server JVM",
   "license": "Apache-2.0",
   "repository": {
@@ -34,6 +34,7 @@
     "dist/src",
     "scripts/smoke.sh",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {

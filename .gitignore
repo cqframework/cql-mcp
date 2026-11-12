@@ -3,3 +3,4 @@ dist/
 *.log
 .DS_Store
 .cql-debug/
+cql-mcp-skill.zip

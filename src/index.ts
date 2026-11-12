@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CqlLsProcess } from './jvm/cqlLsProcess.js';
 import { RuntimeResolver } from './jvm/runtimeResolver.js';
@@ -7,7 +6,7 @@ import { DapSession } from './dap/dapSession.js';
 import { log, configureLog } from './log.js';
 import type { McpContext, Tool } from './tools/defs.js';
 import { buildAllTools } from './tools/allTools.js';
-import { registerTools } from './tools/register.js';
+import { createMcpServer } from './server.js';
 import { SERVER_NAME, SERVER_VERSION } from './version.js';
 import { resolveWorkspaceRoot } from './workspace/workspaceConfig.js';
 
@@ -44,8 +43,7 @@ async function start(): Promise<void> {
 
   const tools: Tool[] = buildAllTools(debugSession);
 
-  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
-  registerTools(server, tools, context);
+  const server = createMcpServer(tools, context);
 
   const handles = { lsProcess, debugSession };
 
