@@ -11,6 +11,11 @@ simulate faithfully. Tick each item against the release candidate before publish
   continue, variables, stop.
 - [ ] **Claude Desktop.** Add the same server to `claude_desktop_config.json` with cwd `/`. Check that
   setting `CQL_MCP_WORKSPACE` works, and that the error is clear when it isn't set.
+- [ ] **The cql-mcp skill.** With `skills/cql-mcp/` installed in Claude Code (copied to
+  `~/.claude/skills/`), a prompt such as "debug why patient X fails population Y" loads the skill
+  and follows its flow: validate, run, debug with breakpoints on expression lines, and
+  `cql_debug_stop` at the end. Check that the release has `cql-mcp-skill.zip` attached and that
+  the zip unpacks to `cql-mcp/SKILL.md`.
 - [ ] **Windows 11 with Defender on.** Do a first-run download, then start a second instance while the
   first is running.
 - [ ] **A machine that already has vscode-cql at the same LS version.** `cql_get_status` shows
