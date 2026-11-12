@@ -6,7 +6,7 @@ All notable changes to `@cqframework/cql-mcp` are recorded here. The format foll
 releases are distributed as tarballs attached to
 [GitHub releases](https://github.com/cqframework/cql-mcp/releases).
 
-## [0.1.0-rc.2] - Unreleased
+## [0.1.0-rc.2] - 2026-11-12
 
 ### Added
 
@@ -65,5 +65,5 @@ It is distributed from GitHub until the npm package is published.
 - A language server crash is reported in a readable sentence, with the exit code and restart
   behaviour.
 
-[0.1.0-rc.2]: https://github.com/cqframework/cql-mcp/compare/v0.1.0-rc.1...feature/agent-guidance
+[0.1.0-rc.2]: https://github.com/cqframework/cql-mcp/compare/v0.1.0-rc.1...v0.1.0-rc.2
 [0.1.0-rc.1]: https://github.com/cqframework/cql-mcp/releases/tag/v0.1.0-rc.1
