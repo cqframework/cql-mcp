@@ -60,6 +60,8 @@ for (const id of [1, 2, 3, 4]) {
 }
 const init = byId.get(1)?.result;
 check("serverInfo.name is cql-mcp", init?.serverInfo?.name === "cql-mcp", init?.serverInfo?.name);
+const instructions = init?.instructions;
+check("initialize sends non-empty instructions", typeof instructions === "string" && instructions.length > 0, String(instructions?.length));
 const tools = byId.get(2)?.result?.tools ?? [];
 check("tools/list has 19 tools", tools.length === 19, String(tools.length));
 const bare = tools.filter((t) => !t.annotations).map((t) => t.name);

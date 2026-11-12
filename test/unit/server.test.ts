@@ -5,14 +5,14 @@ import * as path from 'node:path';
 import { z } from 'zod';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { CqlLsProcess, LanguageServerCrashedError } from '../../src/jvm/cqlLsProcess.js';
 import { RuntimeResolver } from '../../src/jvm/runtimeResolver.js';
 import type { DapSession } from '../../src/dap/dapSession.js';
 import { buildAllTools } from '../../src/tools/allTools.js';
 import type { McpContext, Tool } from '../../src/tools/defs.js';
-import { crashMessage, registerTools } from '../../src/tools/register.js';
+import { createMcpServer } from '../../src/server.js';
+import { crashMessage } from '../../src/tools/register.js';
 
 // The adapter (src/tools/register.ts) alone maps failures to isError results (ADR-0004 §2.1) and
 // validates arguments against the zod schemas (§2.2). These tests drive a real McpServer through
@@ -24,8 +24,7 @@ interface Harness {
 }
 
 async function connect(tools: Tool[], ctx: Partial<McpContext> = {}): Promise<Harness> {
-  const server = new McpServer({ name: 'test', version: '0' });
-  registerTools(server, tools, ctx as McpContext);
+  const server = createMcpServer(tools, ctx as McpContext);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test-client', version: '0' });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
